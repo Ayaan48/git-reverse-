@@ -14,6 +14,7 @@ import asyncio
 import json
 import shutil
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -88,6 +89,7 @@ async def health() -> HealthResponse:
         "ruff": ruff_available(),
         "ai_repair_tier": settings.ai_enabled,
         "workspace_writable": settings.workspace_root.exists(),
+        "test_execution_allowed": settings.allow_test_execution,
     }
     degraded = not checks["workspace_writable"] or not checks["ruff"]
     return HealthResponse(
@@ -254,6 +256,30 @@ async def job_report(job_id: str) -> PlainTextResponse:
     return PlainTextResponse(job.incident_report, media_type="text/markdown")
 
 
+def _mount_dashboard() -> None:
+    """Serve the built React dashboard from this process, when it exists.
+
+    A single origin serving both the UI and the API is the simplest thing to
+    deploy and share: one URL, no CORS to configure, no build-time backend
+    address baked into the bundle. When `frontend/dist` is absent (local
+    development, where Vite serves the UI on its own port) this is a no-op.
+
+    Mounted last so it can never shadow an /api route.
+    """
+    from fastapi.staticfiles import StaticFiles
+
+    for candidate in (
+        Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+        Path(__file__).resolve().parent / "static",
+        Path("/app/frontend/dist"),
+    ):
+        if candidate.is_dir() and (candidate / "index.html").is_file():
+            app.mount(
+                "/", StaticFiles(directory=str(candidate), html=True), name="dashboard"
+            )
+            return
+
+
 @app.get("/api", tags=["meta"])
 async def api_root() -> dict[str, Any]:
     return {
@@ -269,3 +295,7 @@ async def api_root() -> dict[str, Any]:
             "jobs": "GET /api/jobs",
         },
     }
+
+
+# Registered after all API routes so the catch-all mount cannot shadow them.
+_mount_dashboard()

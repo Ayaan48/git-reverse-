@@ -209,40 +209,73 @@ traversal, absolute paths, and symlinks before writing anything to disk.
 
 ## Deployment
 
-### Frontend on Vercel
+### Recommended: one service, one URL
 
-```bash
-npm i -g vercel && vercel
-```
+The API process serves the built dashboard, so a single deploy gives you one
+link to share — no CORS to configure and no backend address baked into the
+frontend bundle.
 
-`vercel.json` builds the React app and routes `/api/*` to the Python function in
-`api/`.
+**Render (free tier, from the included blueprint):**
 
-**Read this before relying on the serverless path.** Vercel functions cap
-execution at 60s on Hobby (higher on Pro with fluid compute), and analyzing a
-large repository routinely takes longer. The serverless function is genuinely
-functional — it ships a git-free repository backend that downloads a tarball and
-writes commits through the GitHub Git Data API, and it writes to `/tmp` — but for
-anything beyond small repositories, host the backend somewhere without a request
-timeout and point the frontend at it:
+1. Push this repository to your GitHub account.
+2. On [render.com](https://render.com): **New → Blueprint** → pick the repo.
+   `render.yaml` supplies the rest.
+3. Optionally add `ANTHROPIC_API_KEY` in the dashboard to enable AI repairs.
 
-```bash
-# Frontend on Vercel, backend anywhere long-running
-vercel env add VITE_API_BASE_URL   # https://your-backend.example.com
-```
+Your URL is then `https://<service-name>.onrender.com`. Free instances sleep
+after inactivity, so the first request after an idle period takes ~50s.
 
-### Backend on any long-running host
+**Any Docker host** (Fly.io, Railway, Cloud Run, ECS, your own box):
 
 ```bash
 docker build -t healing-agent .
 docker run -p 8000:8000 -e ANTHROPIC_API_KEY=sk-ant-… healing-agent
 ```
 
-The image includes `git` and `node`, which enables the higher-fidelity
-repository backend and JavaScript syntax checking. Works as-is on Render,
-Fly.io, Railway, Cloud Run, and ECS.
+Open http://127.0.0.1:8000 — dashboard and API on the same port. The image
+includes `git` and `node`, which enable the higher-fidelity repository backend
+and JavaScript syntax checking.
 
----
+### Before you share the URL
+
+This app accepts a **GitHub token** from whoever uses it. On a link you hand
+out, that means other people's credentials pass through your server. Tokens are
+never logged, never stored on the job record, and every response is scrubbed —
+but they are held in memory for the duration of a run. Treat a public
+deployment accordingly:
+
+| Setting | For a shared URL |
+|---|---|
+| `HEALING_AGENT_ALLOW_TEST_EXECUTION` | **`false`** — the default. Enabling it runs submitted repositories' code on your server. |
+| `HEALING_AGENT_CORS_ORIGINS` | `none` — the dashboard is same-origin, so nothing else needs access. |
+| `HEALING_AGENT_JOB_TIMEOUT` | Lower it (e.g. `600`) to bound what one request can consume. |
+
+If the audience is untrusted, prefer having each person run their own instance
+over sharing one that holds everyone's tokens.
+
+### Frontend-only on Vercel
+
+If you would rather host the dashboard on Vercel and the API elsewhere,
+`vercel.json` builds the React app and routes `/api/*` to the Python function
+in `api/`:
+
+```bash
+npm i -g vercel && vercel
+```
+
+**Read this before relying on the serverless path.** Vercel functions cap
+execution at 60s on Hobby (higher on Pro with fluid compute), and analyzing a
+large repository routinely takes longer. The function is genuinely functional —
+it ships a git-free repository backend that downloads a tarball and writes
+commits through the GitHub Git Data API, and it writes to `/tmp` — but for
+anything beyond small repositories, point the frontend at a long-running
+backend instead:
+
+```bash
+vercel env add VITE_API_BASE_URL   # https://your-backend.onrender.com
+```
+
+Then set `HEALING_AGENT_CORS_ORIGINS` on the backend to your Vercel domain.
 
 ## Configuration
 
@@ -265,7 +298,8 @@ silently breaking things.
 | `HEALING_AGENT_WORKSPACE` | `.workspaces` | Checkout directory; falls back to `/tmp` if read-only |
 | `HEALING_AGENT_MAX_ROUNDS` | `3` | Heal/validate rounds |
 | `HEALING_AGENT_JOB_TIMEOUT` | `900` | Hard ceiling per run, seconds |
-| `HEALING_AGENT_CORS_ORIGINS` | `*` | Comma-separated; restrict in production |
+| `HEALING_AGENT_CORS_ORIGINS` | `*` | Comma-separated allowlist, or `none` to block all cross-origin requests |
+| `HEALING_AGENT_ALLOW_TEST_EXECUTION` | `false` | Runs submitted repos' test suites, which executes their code. Local/trusted use only |
 | `VITE_API_BASE_URL` | same origin | Backend URL for the frontend |
 
 ---
