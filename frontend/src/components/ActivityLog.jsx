@@ -1,11 +1,19 @@
 import React, { useEffect, useRef } from "react";
 
 export default function ActivityLog({ logs }) {
-  const endRef = useRef(null);
+  const listRef = useRef(null);
   const entries = logs ?? [];
 
+  // Scroll the log's own container rather than calling scrollIntoView, which
+  // walks up and scrolls the window too -- that yanked the whole page down on
+  // every streamed line.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "nearest" });
+    const el = listRef.current;
+    if (!el) return;
+    // Leave the user alone if they have scrolled up to read earlier output.
+    const nearBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [entries.length]);
 
   return (
@@ -17,7 +25,7 @@ export default function ActivityLog({ logs }) {
       {entries.length === 0 ? (
         <p className="empty">Waiting for the agent to start…</p>
       ) : (
-        <div className="log">
+        <div className="log" ref={listRef}>
           {entries.map((entry, index) => (
             <div className={`log-line ${entry.level}`} key={index}>
               <span className="log-time">
@@ -28,7 +36,6 @@ export default function ActivityLog({ logs }) {
               <span className="log-msg">{entry.message}</span>
             </div>
           ))}
-          <div ref={endRef} />
         </div>
       )}
     </div>

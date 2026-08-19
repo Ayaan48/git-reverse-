@@ -14,6 +14,98 @@ import { getHealth, startAnalysis, subscribeToJob } from "./api.js";
 
 const TERMINAL = ["succeeded", "partial", "failed", "cancelled"];
 
+const PREFERS_REDUCED_MOTION = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * Reveal cards as they scroll into view.
+ *
+ * Re-runs whenever `dep` changes because panels appear mid-run as the job
+ * streams events. Each element is unobserved once revealed, so a card that is
+ * updating live never re-animates.
+ */
+function useScrollReveal(dep) {
+  useEffect(() => {
+    // Select by :not(.revealed), NOT :not(.reveal). This effect re-runs on
+    // every streamed update and disconnects the previous observer; selecting
+    // on .reveal would skip cards that were already marked but had not yet
+    // scrolled into view, leaving them observed by nobody and invisible for
+    // good.
+    const cards = document.querySelectorAll(".card:not(.revealed)");
+    if (!cards.length) return undefined;
+
+    const revealAll = () =>
+      document
+        .querySelectorAll(".card.reveal:not(.revealed)")
+        .forEach((el) => el.classList.add("revealed"));
+
+    // Nothing may depend on JS to become visible at all. If motion is
+    // unwanted or the observer is unavailable, show everything outright.
+    if (PREFERS_REDUCED_MOTION() || !("IntersectionObserver" in window)) {
+      cards.forEach((el) => el.classList.add("reveal", "revealed"));
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("revealed");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      // Positive bottom margin starts the reveal just before a card scrolls
+      // into view, so it settles rather than popping.
+      { threshold: 0.01, rootMargin: "0px 0px 12% 0px" },
+    );
+
+    cards.forEach((el, index) => {
+      if (!el.classList.contains("reveal")) {
+        el.classList.add("reveal");
+        // Stagger only the first screenful; later cards should not feel laggy.
+        el.style.setProperty("--reveal-delay", `${Math.min(index, 5) * 55}ms`);
+      }
+      observer.observe(el);
+    });
+
+    // Failsafe: whatever has not revealed after this point is shown anyway.
+    // A decorative animation must never be the reason content stays hidden --
+    // from a stalled observer, a print job, or a page capture.
+    const failsafe = window.setTimeout(revealAll, 8000);
+    window.addEventListener("beforeprint", revealAll);
+
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(failsafe);
+      window.removeEventListener("beforeprint", revealAll);
+    };
+  }, [dep]);
+}
+
+/** Condense the sticky masthead once the page has scrolled past its height. */
+function useCondensedHeader(threshold = 40) {
+  const [condensed, setCondensed] = useState(false);
+  useEffect(() => {
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        setCondensed(window.scrollY > threshold);
+        frame = 0;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [threshold]);
+  return condensed;
+}
+
 function useTheme() {
   const [theme, setTheme] = useState(
     () => localStorage.getItem("healing-agent-theme") || "system",
@@ -37,6 +129,13 @@ export default function App() {
 
   const unsubscribeRef = useRef(null);
   const startedAtRef = useRef(null);
+
+  const condensed = useCondensedHeader();
+  // Keyed on the panels that can appear mid-run, so new cards get observed.
+  useScrollReveal(
+    `${job?.job_id ?? "idle"}:${job?.status ?? ""}:${job?.fixes_applied ?? 0}:` +
+      `${job?.validations?.length ?? 0}:${job?.score?.total ?? ""}`,
+  );
 
   useEffect(() => {
     getHealth().then(setHealth).catch(() => setHealth(null));
@@ -157,8 +256,15 @@ export default function App() {
   const aiEnabled = health?.checks?.ai_repair_tier;
 
   return (
-    <div className="app">
-      <div className="masthead">
+    <>
+      <div className="ambient" aria-hidden="true">
+        <span className="orb orb-1" />
+        <span className="orb orb-2" />
+        <span className="orb orb-3" />
+      </div>
+
+      <div className="app">
+      <div className={`masthead${condensed ? " condensed" : ""}`}>
         <div>
           <h1>Autonomous CI/CD Healing Agent</h1>
           <p className="tagline">
@@ -253,6 +359,7 @@ export default function App() {
             : ""}
         </span>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
