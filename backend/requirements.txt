@@ -1,0 +1,12 @@
+# Root requirements file. Vercel's Python runtime installs from this when
+# building the serverless function in api/.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+httpx==0.28.1
+anthropic==0.42.0
+PyYAML==6.0.2
+ruff==0.8.6
+
+# Development / test only
+pytest==8.3.4
