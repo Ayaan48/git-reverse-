@@ -38,17 +38,45 @@ verdict, and responds differently to each case.
 
 ## Quick start
 
+Requires **Python 3.11+** and **Node 18+**.
+
+### macOS / Linux
+
 ```bash
 git clone https://github.com/Ayaan48/git-reverse-
 cd git-reverse-
 
-# Backend
+# Terminal 1 - backend
 pip install -r backend/requirements.txt
 python backend/run.py                 # http://127.0.0.1:8000
 
-# Frontend (second terminal)
+# Terminal 2 - frontend
 cd frontend && npm install && npm run dev    # http://127.0.0.1:5173
 ```
+
+### Windows (PowerShell)
+
+Windows PowerShell 5.1 does not support `&&` as a statement separator -- use
+`;`, or just run the commands on separate lines.
+
+```powershell
+git clone https://github.com/Ayaan48/git-reverse-
+cd git-reverse-
+
+# Terminal 1 - backend
+pip install -r backend/requirements.txt
+python backend/run.py                 # http://127.0.0.1:8000
+```
+
+```powershell
+# Terminal 2 - frontend
+cd frontend
+npm install
+npm run dev                           # http://127.0.0.1:5173
+```
+
+If `python` opens the Microsoft Store, use `py` instead (`py backend/run.py`),
+or install Python from python.org with "Add to PATH" ticked.
 
 Open http://127.0.0.1:5173, fill in the form, and click **Analyze & heal
 repository**.
@@ -217,6 +245,16 @@ Fly.io, Railway, Cloud Run, and ECS.
 ---
 
 ## Configuration
+
+### A note on dependency versions
+
+`requirements.txt` uses version *ranges*, not exact pins. That is deliberate:
+exact pins are more reproducible, but they hard-fail on newer interpreters.
+Pinning `pydantic==2.10.4` resolves `pydantic-core 2.27`, which ships no
+Python 3.14 wheel -- so on 3.14 pip falls back to a Rust source build that
+fails on a stock machine. Ranges let pip pick a build that exists for whichever
+Python you have, while the upper bounds still stop a major release from
+silently breaking things.
 
 | Variable | Default | Purpose |
 |---|---|---|
