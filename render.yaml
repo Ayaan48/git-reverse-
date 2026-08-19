@@ -10,7 +10,9 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /api/health
-    autoDeploy: false
+    # Push to the connected branch redeploys. The image rebuilds the frontend,
+    # so a UI change ships with the same push as a backend change.
+    autoDeploy: true
     envVars:
       # Set this in the Render dashboard to enable model-generated repairs.
       # Without it the agent still detects every problem category and applies
