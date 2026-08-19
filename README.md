@@ -277,6 +277,20 @@ vercel env add VITE_API_BASE_URL   # https://your-backend.onrender.com
 
 Then set `HEALING_AGENT_CORS_ORIGINS` on the backend to your Vercel domain.
 
+#### If the Vercel function returns FUNCTION_INVOCATION_FAILED
+
+At invocation time a Vercel function's directory holds only its own file --
+the rest of the repository is bundled only if `vercel.json` names it. The
+backend package is therefore listed under
+`functions["api/index.py"].includeFiles` as `backend/**`. If that entry is
+missing or edited out, the import fails and the platform reports an opaque
+500.
+
+`api/index.py` now catches that and serves a diagnostic instead, so
+`/api/health` returns the real cause (`backend_import_failed`, the missing
+module, and whether `backend/` was present) rather than a generic crash
+page.
+
 ## Configuration
 
 ### A note on dependency versions
