@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from ..models import Problem, ProblemKind, Severity
@@ -56,8 +57,30 @@ KIND_BY_PREFIX: tuple[tuple[str, ProblemKind], ...] = (
 )
 
 
+def ruff_command() -> list[str] | None:
+    """How to invoke ruff here, or None if it is unavailable.
+
+    Prefers the console script, but falls back to `python -m ruff`: on
+    serverless runtimes the wheel's entry-point script is often not on PATH
+    even though the package is installed, and without this fallback every lint
+    and type finding would silently disappear from the report.
+    """
+    if shutil.which("ruff"):
+        return ["ruff"]
+    try:
+        probe = subprocess.run(
+            [sys.executable, "-m", "ruff", "--version"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if probe.returncode == 0:
+        return [sys.executable, "-m", "ruff"]
+    return None
+
+
 def ruff_available() -> bool:
-    return shutil.which("ruff") is not None
+    return ruff_command() is not None
 
 
 def _classify(code: str) -> tuple[ProblemKind, Severity]:
@@ -71,9 +94,12 @@ def _classify(code: str) -> tuple[ProblemKind, Severity]:
 
 
 def _run_ruff(root: Path, args: list[str], timeout: float = 180.0) -> list[dict]:
+    command = ruff_command()
+    if command is None:
+        return []
     try:
         result = subprocess.run(
-            ["ruff", "check", *args, "--output-format", "json", "--no-cache", "."],
+            [*command, "check", *args, "--output-format", "json", "--no-cache", "."],
             cwd=str(root),
             capture_output=True,
             text=True,
