@@ -139,9 +139,32 @@ def stage_compile(root: Path) -> StageResult:
     )
 
 
-def stage_tests(root: Path, enabled: bool = True, timeout: float = 180.0) -> StageResult:
-    """Run the repository's pytest suite if one is present and runnable."""
+def stage_tests(
+    root: Path,
+    enabled: bool = True,
+    timeout: float = 180.0,
+    allowed: bool = False,
+) -> StageResult:
+    """Run the repository's pytest suite if one is present and runnable.
+
+    `allowed` is the operator-level switch and `enabled` is the per-request one;
+    both must be true. Collecting a test suite imports `conftest.py` and every
+    test module, so this stage executes code from the repository under
+    analysis. On a shared deployment that would let any submitted URL run code
+    on the server, which is why the operator switch defaults to off.
+    """
     start = time.monotonic()
+    if not allowed:
+        return StageResult(
+            name="tests", passed=True, duration_ms=_timed(start),
+            detail=(
+                "Test execution is disabled on this server. Running a cloned "
+                "repository's suite executes its code; set "
+                "HEALING_AGENT_ALLOW_TEST_EXECUTION=true only where every "
+                "submitted repository is trusted."
+            ),
+            skipped=True,
+        )
     if not enabled:
         return StageResult(
             name="tests", passed=True, duration_ms=_timed(start),
@@ -212,7 +235,10 @@ def _has_timeout_plugin() -> bool:
 
 
 def run_validation(
-    root: Path, round_index: int = 1, run_tests: bool = True
+    root: Path,
+    round_index: int = 1,
+    run_tests: bool = True,
+    allow_test_execution: bool = False,
 ) -> ValidationRun:
     """Execute every gate and aggregate the verdict."""
     run = ValidationRun(round_index=round_index)
@@ -221,7 +247,7 @@ def run_validation(
         stage_imports(root),
         stage_lint(root),
         stage_compile(root),
-        stage_tests(root, enabled=run_tests),
+        stage_tests(root, enabled=run_tests, allowed=allow_test_execution),
     ]
     run.passed = all(stage.passed for stage in run.stages)
     return run

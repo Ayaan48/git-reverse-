@@ -300,6 +300,7 @@ def run_pipeline(job: Job, request: AnalyzeRequest, settings: Settings) -> None:
                 checkout.path,
                 round_index=round_index,
                 run_tests=request.run_tests,
+                allow_test_execution=settings.allow_test_execution,
             )
             job.add_validation(validation)
             job.log(
@@ -328,7 +329,10 @@ def run_pipeline(job: Job, request: AnalyzeRequest, settings: Settings) -> None:
         if validation is None:
             job.set_phase(Phase.VALIDATING, "Validating baseline")
             validation = run_validation(
-                checkout.path, round_index=1, run_tests=request.run_tests
+                checkout.path,
+                round_index=1,
+                run_tests=request.run_tests,
+                allow_test_execution=settings.allow_test_execution,
             )
             job.add_validation(validation)
             job.log(
