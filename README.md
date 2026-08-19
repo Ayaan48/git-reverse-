@@ -225,6 +225,20 @@ frontend bundle.
 Your URL is then `https://<service-name>.onrender.com`. Free instances sleep
 after inactivity, so the first request after an idle period takes ~50s.
 
+**Updating it.** `autoDeploy` is on, so pushing to the connected branch
+redeploys. The image builds the frontend itself, so a UI change ships with the
+same push as a backend change -- there is nothing to build locally first.
+
+To deploy without a push (a rollback, or a rebuild after changing an
+environment variable), use **Manual Deploy** in the Render dashboard:
+*Deploy latest commit* rebuilds from the branch head, and *Clear build cache &
+deploy* forces a full rebuild when a dependency change has not been picked up.
+Changing an env var alone triggers a restart, not a rebuild.
+
+Watch the deploy log for the two stages: `npm run build` for the dashboard,
+then the Python image. The service is live once `/api/health` answers -- that
+is the path Render's health check polls.
+
 **Any Docker host** (Fly.io, Railway, Cloud Run, ECS, your own box):
 
 ```bash
