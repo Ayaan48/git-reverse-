@@ -6,7 +6,7 @@ through a CI/CD-style gate loop, pushes a healed branch, and hands you the link
 — while continuously monitoring the pipeline so it can tell **"your code broke
 the build"** apart from **"the platform is degraded."**
 
-<img width="900" alt="dashboard" src="docs/dashboard.png">
+<img width="900" alt="The dashboard mid-run: glass panels over an ambient field, live progress, findings, and gate results" src="docs/dashboard.png">
 
 ---
 

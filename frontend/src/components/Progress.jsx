@@ -11,8 +11,13 @@ export default function Progress({ job, elapsed }) {
   const status = job?.status ?? "queued";
   const index = PHASES.indexOf(phase);
 
-  const fillClass =
-    status === "failed" ? "failed" : status === "succeeded" ? "done" : "";
+  const running = status === "queued" || status === "running";
+  const fillClass = [
+    status === "failed" ? "failed" : status === "succeeded" ? "done" : "",
+    running ? "active" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className="card">
