@@ -19,10 +19,23 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _env_list(name: str, default: list[str]) -> list[str]:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
         return list(default)
+    # "none" means allow no cross-origin requests at all. An unset variable
+    # falls back to the default, so without this there would be no way to
+    # express "lock it down" -- which is what a single-origin deployment,
+    # where the dashboard is served by this same process, actually wants.
+    if raw.strip().lower() == "none":
+        return []
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
@@ -90,6 +103,14 @@ class Settings:
     max_repo_files: int = field(
         default_factory=lambda: _env_int("HEALING_AGENT_MAX_REPO_FILES", 4000)
     )
+    # Running a cloned repository's test suite executes code from that
+    # repository: pytest imports conftest.py and every test module at
+    # collection time. That is fine when you point the agent at your own code,
+    # and unacceptable on a shared deployment where anyone can submit a URL.
+    # Off unless an operator explicitly turns it on.
+    allow_test_execution: bool = field(
+        default_factory=lambda: _env_bool("HEALING_AGENT_ALLOW_TEST_EXECUTION", False)
+    )
 
     @property
     def ai_enabled(self) -> bool:
@@ -111,6 +132,7 @@ class Settings:
             "max_rounds": self.max_rounds,
             "job_timeout_seconds": self.job_timeout_seconds,
             "status_page_url": self.status_page_url,
+            "test_execution_allowed": self.allow_test_execution,
         }
 
 
