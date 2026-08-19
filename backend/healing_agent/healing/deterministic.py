@@ -15,6 +15,7 @@ import subprocess
 from collections import Counter
 from pathlib import Path
 
+from ..analysis.lint import ruff_command
 from ..models import Fix, FixTier, Problem, ProblemKind
 
 # Rules ruff can fix safely (no semantic change).
@@ -224,10 +225,13 @@ def run_ruff_autofix(root: Path, timeout: float = 180.0) -> tuple[int, str]:
     are deliberately not enabled: they can change behaviour, and this agent
     must never trade a lint warning for a behavioural regression.
     """
+    command = ruff_command()
+    if command is None:
+        return 0, "ruff is not available in this environment"
     try:
         result = subprocess.run(
             [
-                "ruff", "check", "--isolated", "--select", AUTOFIX_SELECT,
+                *command, "check", "--isolated", "--select", AUTOFIX_SELECT,
                 "--fix", "--no-cache", ".",
             ],
             cwd=str(root), capture_output=True, text=True, timeout=timeout,
