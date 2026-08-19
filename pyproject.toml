@@ -1,3 +1,16 @@
+# Vercel's Python runtime statically locates a top-level FastAPI instance
+# named `app`. Ours lives in a package under backend/, which is not one of the
+# locations it scans, so point it there explicitly.
+#
+# With this set there is no api/ function shim and no rewrite: every request
+# reaches FastAPI, which already namespaces its own routes under /api and
+# serves the built dashboard for everything else. That matters because Vercel
+# now routes internal rewrites using the REWRITTEN path -- a
+# "/api/(.*) -> /api/index" rule would hand FastAPI the literal path
+# "/api/index" and 404 every real route.
+[tool.vercel]
+entrypoint = "backend.healing_agent.app:app"
+
 [tool.ruff]
 line-length = 88
 target-version = "py311"

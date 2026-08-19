@@ -268,10 +268,13 @@ def _mount_dashboard() -> None:
     """
     from fastapi.staticfiles import StaticFiles
 
+    package_root = Path(__file__).resolve().parent
+    repo_root = package_root.parent.parent
     for candidate in (
-        Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
-        Path(__file__).resolve().parent / "static",
-        Path("/app/frontend/dist"),
+        repo_root / "frontend" / "dist",     # repo checkout and Docker image
+        package_root / "static",             # vendored copy, if ever used
+        Path("/app/frontend/dist"),          # container WORKDIR
+        Path.cwd() / "frontend" / "dist",    # host launched from repo root
     ):
         if candidate.is_dir() and (candidate / "index.html").is_file():
             app.mount(

@@ -253,43 +253,34 @@ deployment accordingly:
 If the audience is untrusted, prefer having each person run their own instance
 over sharing one that holds everyone's tokens.
 
-### Frontend-only on Vercel
+### Vercel
 
-If you would rather host the dashboard on Vercel and the API elsewhere,
-`vercel.json` builds the React app and routes `/api/*` to the Python function
-in `api/`:
+Vercel's Python runtime locates a top-level FastAPI instance named `app` by
+scanning a fixed set of paths. Ours lives in a package under `backend/`, so
+`pyproject.toml` points at it directly:
+
+```toml
+[tool.vercel]
+entrypoint = "backend.healing_agent.app:app"
+```
+
+There is deliberately **no `api/` shim and no rewrite**. Vercel now routes
+internal rewrites using the *rewritten* destination path, so a
+`"/api/(.*)" -> "/api/index"` rule would hand FastAPI the literal path
+`/api/index` and 404 every real route. Instead every request reaches FastAPI,
+which already namespaces its routes under `/api` and serves the built
+dashboard for everything else.
 
 ```bash
 npm i -g vercel && vercel
 ```
 
-**Read this before relying on the serverless path.** Vercel functions cap
+**Know the limits before choosing this target.** Vercel functions cap
 execution at 60s on Hobby (higher on Pro with fluid compute), and analyzing a
-large repository routinely takes longer. The function is genuinely functional —
-it ships a git-free repository backend that downloads a tarball and writes
-commits through the GitHub Git Data API, and it writes to `/tmp` — but for
-anything beyond small repositories, point the frontend at a long-running
-backend instead:
-
-```bash
-vercel env add VITE_API_BASE_URL   # https://your-backend.onrender.com
-```
-
-Then set `HEALING_AGENT_CORS_ORIGINS` on the backend to your Vercel domain.
-
-#### If the Vercel function returns FUNCTION_INVOCATION_FAILED
-
-At invocation time a Vercel function's directory holds only its own file --
-the rest of the repository is bundled only if `vercel.json` names it. The
-backend package is therefore listed under
-`functions["api/index.py"].includeFiles` as `backend/**`. If that entry is
-missing or edited out, the import fails and the platform reports an opaque
-500.
-
-`api/index.py` now catches that and serves a diagnostic instead, so
-`/api/health` returns the real cause (`backend_import_failed`, the missing
-module, and whether `backend/` was present) rather than a generic crash
-page.
+large repository routinely takes longer. There is also no `git` binary, so the
+agent falls back to its pure-HTTP repository backend — functional, but the
+lesser of the two paths. For anything beyond small repositories, deploy the
+Docker image somewhere without a request ceiling.
 
 ## Configuration
 
