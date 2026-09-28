@@ -49,6 +49,7 @@ def build_incident_report(
     elapsed_seconds: float,
     score: dict[str, Any],
     branch_url: str | None = None,
+    memory: dict[str, Any] | None = None,
 ) -> str:
     """Render the auto-generated post-incident report as Markdown."""
     lines: list[str] = []
@@ -215,6 +216,31 @@ def build_incident_report(
         for component in score.get("breakdown", []):
             add(f"- {component['label']}: {component['points']}/{component['max']} "
                 f"- {component['detail']}")
+        add("")
+
+    # --------------------------------------------------------------- memory
+    if memory and memory.get("enabled"):
+        add("## 9. Incident memory")
+        add("")
+        incidents = memory.get("incidents_found", 0)
+        influenced = memory.get("influenced_incidents") or []
+        if memory.get("error"):
+            add(f"Recall failed: `{memory['error']}` - diagnosed without memory.")
+        elif not incidents:
+            add("No similar past incidents were found in memory.")
+        else:
+            add(f"Recalled **{incidents}** similar past incident(s); "
+                f"**{len(influenced)}** influenced the diagnosis.")
+            add("")
+            for item in (memory.get("memories") or [])[:8]:
+                mark = " *(influenced diagnosis)*" if item.get("influenced") else ""
+                label = item.get("failure_class") or "unclassified"
+                add(f"- [{label}] {item.get('text', '')}{mark}")
+        if memory.get("risk_notes"):
+            add("")
+            add("### Pre-merge risk notes (from past incidents)")
+            add("")
+            add(memory["risk_notes"])
         add("")
 
     add("---")

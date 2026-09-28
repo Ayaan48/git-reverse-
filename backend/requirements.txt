@@ -12,6 +12,8 @@ httpx>=0.27,<1.0
 anthropic>=0.42,<1.0
 PyYAML>=6.0,<7.0
 ruff>=0.8,<1.0
+# Optional persistent memory; the agent runs without a Hindsight key.
+hindsight-client>=0.10,<1.0
 
 # Development / test only
 pytest>=8.0,<10.0

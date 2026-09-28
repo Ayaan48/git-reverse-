@@ -61,3 +61,15 @@ def clean_repo(tmp_path: Path) -> Path:
         "def main():\n    print(add(1, 2))\n"
     )
     return root
+
+
+@pytest.fixture(autouse=True)
+def _memory_offline(monkeypatch):
+    """Keep every test offline: no test may reach Hindsight Cloud by accident,
+    even when the developer's shell has HINDSIGHT_API_KEY set."""
+    from healing_agent.memory import reset_memory_service
+
+    monkeypatch.delenv("HINDSIGHT_API_KEY", raising=False)
+    reset_memory_service()
+    yield
+    reset_memory_service()

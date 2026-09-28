@@ -11,6 +11,7 @@ function evidenceClass(text) {
   if (text.startsWith("[platform")) return "platform";
   if (text.startsWith("[code")) return "code";
   if (text.startsWith("[rule")) return "rule";
+  if (text.startsWith("[memory")) return "memory";
   return "";
 }
 

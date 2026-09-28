@@ -28,6 +28,7 @@ verdict, and responds differently to each case.
 
 | Stage | Behaviour |
 |---|---|
+| **Remember** | Before diagnosing, recalls similar past incidents from a persistent [Hindsight](https://hindsight.vectorize.io) memory bank; after every run, retains what happened. Optional — see [Incident memory](#incident-memory-hindsight). |
 | **Detect** | Clones the repo and scans for syntax errors, tab/space indentation faults, unresolved imports, undefined names and type problems, lint defects, and malformed JSON/YAML — including GitHub workflow files. |
 | **Diagnose** | Reads Actions telemetry (failure rate, queue latency, stuck jobs, failing steps) and the provider status page, then classifies the failure as `code`, `platform`, `mixed`, or `unknown` — with every contributing signal and its weight recorded. |
 | **Heal** | Applies deterministic repairs first, then model-generated ones. Every model patch must parse **and** reduce that file's problem count **and** preserve every function and class it defined, or it is rolled back. |
@@ -91,6 +92,94 @@ cp .env.example .env      # then edit
 
 ---
 
+## Incident memory (Hindsight)
+
+Without memory, every failure is diagnosed from scratch. With it, the agent
+**retains every incident it handles** and **recalls similar past failures
+before diagnosing a new one**, so the hundredth `No module named 'yaml'` is
+recognised as a known pattern with a known fix rather than re-derived.
+
+Memory is provided by [Hindsight](https://hindsight.vectorize.io) (by
+Vectorize), using Hindsight Cloud. It is strictly **additive**: with no API key
+the agent behaves exactly as it always has, and an unreachable memory service
+degrades to "no memories found", never to a failed run.
+
+### What it does in the loop
+
+| When | Call | What happens |
+|---|---|---|
+| Before diagnosis | `recall()` | Queries memory with the run's CI error lines, failing steps, defect codes, and package names. Only results the reranker scores as genuinely similar (≥ 0.1) are kept. |
+| During diagnosis | — | Precedents become one more weighted, auditable signal: `[memory +0.5] 1 similar past incident(s) were platform-level failures - e.g. "…"`. |
+| During repair | — | Recalled fixes, including ones that were *rejected*, are passed to the model repair tier as hints, not instructions. |
+| Before merge | `reflect()` | Reasons over past incidents to write pre-merge risk notes for the healing branch. |
+| After every run | `retain()` | Stores the post-incident data: error signatures, the verdict, each repair and whether it passed validation, and the outcome. Tagged by repo, class, and failure type. Runs whether the run succeeded or failed. |
+
+**Guardrails.** Memory is a prior, not proof:
+
+- It adds at most **+1.5** to either side (0.5 per net agreeing incident), less
+  than a single strong live error signature.
+- It **cannot manufacture a verdict**. With no live evidence, recalled incidents
+  are reported as context, but they add no weight.
+- It **cannot override local reproduction**. A defect the agent reproduced
+  itself still floors the verdict at `mixed`, whatever memory says.
+- The bank carries two directives: *never recommend skipping tests to make a
+  build pass*, and *never recommend pushing directly to the default branch*.
+  Disposition is skepticism 4 and literalism 4 (on a 1-5 scale).
+
+### Setup
+
+```bash
+# 1. Add to .env (see .env.example)
+HINDSIGHT_API_URL=https://api.hindsight.vectorize.io
+HINDSIGHT_API_KEY=hsk_...
+HINDSIGHT_BANK_ID=cicd-healing-agent
+
+# 2. Create the bank (mission, directives, disposition). Safe to re-run.
+python scripts/setup_memory_bank.py
+
+# 3. Optional: load 19 synthetic incidents spread over the last 60 days
+python scripts/seed_memory.py             # --dry-run to preview, --wait to block
+```
+
+The bank definition lives in `backend/healing_agent/memory/bank-template.json`.
+The seed set covers missing imports, syntax errors, dependency conflicts
+(pydantic/fastapi, numpy 2 ABI, npm `ERESOLVE`), flaky tests, GitHub Actions
+degradation (including the misleading `account suspended`), rate limits, and
+runner capacity. Several seeds record rejected fixes, such as skipping a
+flaky test or adding `--legacy-peer-deps`. Fact extraction runs server-side,
+so allow a minute or two after seeding before recall returns results.
+
+On Render, set `HINDSIGHT_API_KEY` in the dashboard (it is declared in
+`render.yaml` with `sync: false`).
+
+### Seeing it work
+
+1. **Without memory.** Leave `HINDSIGHT_API_KEY` empty and run the agent
+   against a repo with a missing dependency. The masthead shows *memory off*,
+   the log shows `Memory: off (...)`, and the diagnosis evidence is live signals
+   only.
+2. **With seeded memory.** Set the key, run the setup and seed scripts, and
+   restart. The masthead shows *memory connected*, and `GET /api/health`
+   reports `checks.memory.connected: true`. Run the same repo. The log shows
+   `Memory: recalled N fact(s) from K similar past incident(s)`, the
+   diagnosis carries a green `[memory +…]` evidence line naming the matching
+   incident, and the **Incident memory** panel lists the recalled incidents,
+   marks the ones that influenced the verdict, and shows pre-merge risk notes.
+   The post-incident report gains a section 9, *Incident memory*.
+3. **It learns.** Every run is retained, so the next similar failure, in any
+   repository, recalls this one.
+
+You can query memory directly:
+
+```python
+from healing_agent.memory import HindsightService
+svc = HindsightService()
+svc.recall("Error: API rate limit exceeded for installation").incident_ids   # ['seed-015']
+svc.reflect("Which dependency fixes have been rejected before, and why?")
+```
+
+---
+
 ## API
 
 Two endpoints carry the product; the rest support the live dashboard.
@@ -105,7 +194,10 @@ confusing mid-run failure.
 {
   "status": "ok",
   "version": "1.0.0",
-  "checks": { "git_binary": true, "ruff": true, "ai_repair_tier": false },
+  "checks": {
+    "git_binary": true, "ruff": true, "ai_repair_tier": false,
+    "memory": { "enabled": true, "connected": true, "bank_id": "cicd-healing-agent" }
+  },
   "config": { "repo_backend": "git-cli", "model": "claude-opus-5" }
 }
 ```
@@ -319,6 +411,9 @@ silently breaking things.
 | `HEALING_AGENT_JOB_TIMEOUT` | `900` | Hard ceiling per run, seconds |
 | `HEALING_AGENT_CORS_ORIGINS` | `*` | Comma-separated allowlist, or `none` to block all cross-origin requests |
 | `HEALING_AGENT_ALLOW_TEST_EXECUTION` | `false` | Runs submitted repos' test suites, which executes their code. Local/trusted use only |
+| `HINDSIGHT_API_URL` | `https://api.hindsight.vectorize.io` | Hindsight Cloud endpoint |
+| `HINDSIGHT_API_KEY` | — | Enables persistent incident memory. Optional. |
+| `HINDSIGHT_BANK_ID` | `cicd-healing-agent` | Memory bank the agent reads and writes |
 | `VITE_API_BASE_URL` | same origin | Backend URL for the frontend |
 
 ---
@@ -345,11 +440,13 @@ backend/healing_agent/
   analysis/               Detectors: syntax, indentation, imports, lint, config
   healing/                Two-tier repair + the verification gate
   cicd/                   Telemetry, status page, diagnosis, remediation, reports
+  memory/                 Hindsight incident memory: recall, retain, reflect
   repo/                   Dual backend: git CLI and pure-HTTP GitHub API
   validation.py           CI/CD gate loop
   redaction.py            Secret scrubbing
 frontend/src/             React dashboard (Vite)
-tests/                    67 tests
+scripts/                  setup_memory_bank.py, seed_memory.py
+tests/                    80 tests
 ```
 
 ---

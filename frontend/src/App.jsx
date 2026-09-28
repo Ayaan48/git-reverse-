@@ -6,6 +6,7 @@ import Findings from "./components/Findings.jsx";
 import Fixes from "./components/Fixes.jsx";
 import Validation from "./components/Validation.jsx";
 import Diagnosis from "./components/Diagnosis.jsx";
+import Memory, { MemoryPill } from "./components/Memory.jsx";
 import ScoreCard from "./components/ScoreCard.jsx";
 import ActivityLog from "./components/ActivityLog.jsx";
 import ResultPanel from "./components/ResultPanel.jsx";
@@ -210,6 +211,9 @@ export default function App() {
         case "score":
           next.score = data;
           break;
+        case "memory":
+          next.memory = data;
+          break;
         default:
           return current;
       }
@@ -285,6 +289,7 @@ export default function App() {
             <span className="dot" />
             {aiEnabled ? "AI repairs on" : "rule-based only"}
           </span>
+          <MemoryPill health={health} />
           <button
             className="icon-button"
             onClick={() =>
@@ -329,6 +334,7 @@ export default function App() {
               <header><h2>How it works</h2></header>
               <ol style={{ fontSize: "0.84rem", color: "var(--text-secondary)", paddingLeft: 18, margin: 0, lineHeight: 1.8 }}>
                 <li><strong>Detect</strong> — clones the repo and scans for syntax errors, bad indentation, unresolved imports, type and lint defects, and malformed workflow files.</li>
+                <li><strong>Remember</strong> — recalls similar past incidents from Hindsight memory before diagnosing, and retains every run afterwards so the next similar failure is recognised.</li>
                 <li><strong>Diagnose</strong> — reads Actions telemetry and the provider status page to classify failures as code-level or platform-level, with the evidence shown.</li>
                 <li><strong>Heal</strong> — applies deterministic repairs first, then model-generated ones; every model patch must parse and reduce the problem count or it is rolled back.</li>
                 <li><strong>Validate</strong> — runs syntax, imports, lint, compile, and test gates, looping until they pass or no further repair is possible.</li>
@@ -341,6 +347,7 @@ export default function App() {
               <ResultPanel job={job} />
               <ScoreCard job={job} />
               <Diagnosis job={job} />
+              <Memory job={job} />
               <Validation job={job} />
               <Findings job={job} />
               <Fixes job={job} />

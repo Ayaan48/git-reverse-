@@ -447,6 +447,9 @@ a { color: var(--accent); }
 .evidence li.platform { border-left-color: var(--accent); }
 .evidence li.code { border-left-color: var(--status-serious); }
 .evidence li.rule { border-left-color: var(--status-warning); }
+.evidence li.memory { border-left-color: var(--status-good); }
+.fix-item.memory { border-left-color: var(--border-strong); }
+.fix-item.memory.influenced { border-left-color: var(--status-good); }
 
 /* ------------------------------------------------------------------ lists */
 .table-scroll { overflow-x: auto; }

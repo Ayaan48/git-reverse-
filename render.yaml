@@ -20,6 +20,13 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
 
+      # Optional persistent incident memory (Hindsight). Leave the key unset
+      # to run without memory.
+      - key: HINDSIGHT_API_KEY
+        sync: false
+      - key: HINDSIGHT_BANK_ID
+        value: cicd-healing-agent
+
       # The dashboard is served from this same service, so requests are
       # same-origin and no cross-origin allowance is needed.
       - key: HEALING_AGENT_CORS_ORIGINS

@@ -33,6 +33,13 @@ from .config import Settings
 from .github import GitHubClient, GitHubError
 from .healing import heal
 from .jobstore import Job
+from .memory import (
+    HindsightService,
+    MemoryRecall,
+    build_incident_record,
+    build_recall_query,
+    get_memory_service,
+)
 from .models import AnalyzeRequest, JobStatus, Phase, Severity
 from .redaction import register_secret, scrub
 from .repo import changed_since, select_backend
@@ -123,8 +130,65 @@ def _parse_iso(value: object) -> datetime | None:
         return None
 
 
-def run_pipeline(job: Job, request: AnalyzeRequest, settings: Settings) -> None:
+def _memory_state(
+    memory: HindsightService, recall: MemoryRecall, influenced: list[str]
+) -> dict:
+    """What the dashboard's Memory panel renders."""
+    state = recall.to_dict()
+    influenced_set = set(influenced)
+    for item in state["memories"]:
+        item["influenced"] = (item["incident_id"] or item["id"]) in influenced_set
+    state.update(
+        bank_id=memory.bank_id,
+        disabled_reason=memory.disabled_reason,
+        influenced_incidents=influenced,
+        retained=None,
+    )
+    return state
+
+
+def _remember(
+    job: Job,
+    memory: HindsightService,
+    status: JobStatus,
+    problems: list,
+    telemetry: PipelineTelemetry,
+    log_text: str,
+) -> None:
+    """Retain this run so the next similar failure is recognised. Best-effort."""
+    if not memory.enabled or job.diagnosis is None:
+        return
+    record = build_incident_record(
+        incident_id=f"incident-{job.id}",
+        repo=f"{job.owner}/{job.repo}",
+        outcome=status.value,
+        diagnosis=job.diagnosis,
+        problems=problems,
+        fixes=job.fixes,
+        validations=job.validations,
+        remediations=job.remediations,
+        telemetry=telemetry,
+        log_text=log_text,
+    )
+    retained = memory.retain(record)
+    job.log(
+        "Memory: incident retained for future recall."
+        if retained
+        else "Memory: could not retain this incident (see server log).",
+        "info" if retained else "warn",
+    )
+    if job.memory:
+        job.set_memory({**job.memory, "retained": retained})
+
+
+def run_pipeline(
+    job: Job,
+    request: AnalyzeRequest,
+    settings: Settings,
+    memory: HindsightService | None = None,
+) -> None:
     """Execute the full detect -> diagnose -> heal -> validate -> push flow."""
+    memory = memory or get_memory_service()
     token = request.github_token or settings.fallback_github_token
     register_secret(token)
     register_secret(settings.fallback_github_token)
@@ -136,6 +200,8 @@ def run_pipeline(job: Job, request: AnalyzeRequest, settings: Settings) -> None:
     problems_before = []
     telemetry = PipelineTelemetry()
     platform_status = PlatformStatus()
+    log_text = ""
+    recall = MemoryRecall(enabled=memory.enabled)
 
     try:
         workspace.mkdir(parents=True, exist_ok=True)
@@ -218,18 +284,41 @@ def run_pipeline(job: Job, request: AnalyzeRequest, settings: Settings) -> None:
         preliminary = run_validation(
             checkout.path, round_index=0, run_tests=False
         )
+        log_text = build_log_corpus(telemetry)
+
+        # Ask memory whether this failure has been seen before. Additive
+        # only: with memory off or unreachable, `recall` is simply empty.
+        if memory.enabled:
+            recall = memory.recall(
+                build_recall_query(problems_before, telemetry, log_text)
+            )
+            if recall.error:
+                job.log(f"Memory recall failed: {recall.error}", "warn")
+            else:
+                job.log(
+                    f"Memory: recalled {len(recall.memories)} fact(s) from "
+                    f"{len(recall.incident_ids)} similar past incident(s)"
+                )
+        else:
+            job.log(f"Memory: off ({memory.disabled_reason})")
 
         diagnosis = diagnose(
             DiagnosisInput(
                 telemetry=telemetry,
                 platform_status=platform_status,
-                log_text=build_log_corpus(telemetry),
+                log_text=log_text,
                 local_critical_problems=critical_count,
                 local_validation_failed=not preliminary.passed,
                 recent_workflow_change=bool(changed_workflows),
+                recalled_memories=[m.to_dict() for m in recall.memories],
             )
         )
         job.set_diagnosis(diagnosis)
+        job.set_memory(
+            _memory_state(
+                memory, recall, diagnosis.signals.get("memory_influenced", [])
+            )
+        )
         job.log(
             f"Diagnosis: {diagnosis.failure_class.value.upper()} "
             f"(confidence {diagnosis.confidence:.0%}) -> "
@@ -287,6 +376,7 @@ def run_pipeline(job: Job, request: AnalyzeRequest, settings: Settings) -> None:
                 round_index=round_index,
                 use_ai=request.use_ai,
                 on_progress=progress,
+                memory_context=recall.as_prompt_context(),
             )
             for fix in outcome.fixes:
                 job.add_fix(fix)
@@ -399,6 +489,22 @@ def run_pipeline(job: Job, request: AnalyzeRequest, settings: Settings) -> None:
 
         # ------------------------------------------------------- REPORTING ---
         job.set_phase(Phase.REPORTING, "Generating report")
+
+        # Pre-merge risk notes: reason over past incidents about this change.
+        if memory.enabled and changed_files and job.memory:
+            risk_notes = memory.reflect(
+                f"Pre-merge risk review for a healing branch on "
+                f"{job.owner}/{job.repo}. Diagnosis: "
+                f"{job.diagnosis.failure_class.value if job.diagnosis else 'unknown'}. "
+                f"Files changed: {', '.join(changed_files[:15])}. Repairs: "
+                + "; ".join(f.description for f in job.fixes[:10])
+                + ". Based on similar past incidents, which of these repairs "
+                "have been rejected or regressed before, and what should a "
+                "reviewer check before merging? Answer in at most 5 bullets."
+            )
+            if risk_notes:
+                job.set_memory({**job.memory, "risk_notes": risk_notes})
+                job.log("Memory: pre-merge risk notes generated from past incidents")
         elapsed = time.monotonic() - started
         score = compute_score(
             problems_before, after, len(job.fixes), elapsed, job.validations
@@ -419,6 +525,7 @@ def run_pipeline(job: Job, request: AnalyzeRequest, settings: Settings) -> None:
             elapsed_seconds=elapsed,
             score=score,
             branch_url=job.branch_url,
+            memory=job.memory,
         )
 
         resolved = len(problems_before) - len(after)
@@ -438,10 +545,17 @@ def run_pipeline(job: Job, request: AnalyzeRequest, settings: Settings) -> None:
             f"resolved, {len(job.fixes)} fix(es) applied, "
             f"score {score['total']}/100 ({score['grade']})"
         )
+        _remember(job, memory, status, problems_before, telemetry, log_text)
         job.finish(status, job.error)
 
     except Exception as exc:  # noqa: BLE001 - top-level guard for the worker
         job.log(f"Pipeline error: {scrub(str(exc))}", "error")
+        try:
+            _remember(
+                job, memory, JobStatus.FAILED, problems_before, telemetry, log_text
+            )
+        except Exception:  # noqa: BLE001 - memory must never mask the failure
+            pass
         job.finish(JobStatus.FAILED, str(exc))
     finally:
         if client:

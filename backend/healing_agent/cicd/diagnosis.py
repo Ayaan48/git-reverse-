@@ -13,7 +13,8 @@ available, but it can never manufacture a verdict the evidence does not support.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from ..models import Diagnosis, FailureClass, HealingAction
 from .statuspage import PlatformStatus
@@ -116,6 +117,9 @@ class DiagnosisInput:
     local_critical_problems: int = 0
     local_validation_failed: bool = False
     recent_workflow_change: bool = False
+    # Similar past incidents recalled from persistent memory (dicts shaped
+    # like RecalledMemory.to_dict()). Optional: empty without memory.
+    recalled_memories: list[dict[str, Any]] = field(default_factory=list)
 
 
 def diagnose(data: DiagnosisInput) -> Diagnosis:
@@ -256,7 +260,92 @@ def diagnose(data: DiagnosisInput) -> Diagnosis:
             "config regression is a likely cause."
         )
 
-    return _verdict(platform_score, code_score, evidence, categories, data)
+    memory_signals: dict[str, Any] = {}
+    if data.recalled_memories:
+        platform_score, code_score, memory_signals = _memory_signal(
+            data.recalled_memories, platform_score, code_score, evidence
+        )
+
+    diagnosis = _verdict(platform_score, code_score, evidence, categories, data)
+    diagnosis.signals.update(memory_signals)
+    return diagnosis
+
+
+# Per-incident weight of a recalled precedent, and the most memory may add.
+# Deliberately below a single strong live signature: memory says "this looked
+# like X before", which is a prior, not proof about the run in front of us.
+MEMORY_WEIGHT_PER_INCIDENT = 0.5
+MEMORY_WEIGHT_CAP = 1.5
+
+
+def _memory_signal(
+    memories: list[dict[str, Any]],
+    platform_score: float,
+    code_score: float,
+    evidence: list[str],
+) -> tuple[float, float, dict[str, Any]]:
+    """Fold recalled precedents into the scores.
+
+    Memory can only tip a verdict the live evidence already supports. With no
+    live signal at all it adds context but no weight -- otherwise a bank full
+    of past outages would classify a perfectly quiet pipeline as degraded.
+    """
+    by_class: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    for memory in memories:
+        incident = memory.get("incident_id") or memory.get("id") or ""
+        cls = memory.get("failure_class") or ""
+        if not incident or incident in seen or cls not in {"code", "platform", "mixed"}:
+            continue
+        seen.add(incident)
+        by_class.setdefault(cls, []).append(incident)
+
+    total_incidents = len({m.get("incident_id") or m.get("id") for m in memories})
+    signals: dict[str, Any] = {
+        "memory_incidents": total_incidents,
+        "memory_by_class": {k: len(v) for k, v in sorted(by_class.items())},
+        "memory_influenced": [],
+    }
+
+    platform_votes = len(by_class.get("platform", []))
+    code_votes = len(by_class.get("code", []))
+    live_total = platform_score + code_score
+
+    if live_total < 1.0 or platform_votes == code_votes:
+        evidence.append(
+            f"[memory] Recalled {total_incidents} similar past incident(s) "
+            f"(platform {platform_votes}, code {code_votes}, mixed "
+            f"{len(by_class.get('mixed', []))}); no weight applied"
+            + (" - no live evidence to corroborate." if live_total < 1.0 else
+               " - precedents are split.")
+        )
+        return platform_score, code_score, signals
+
+    side = "platform" if platform_votes > code_votes else "code"
+    lead = abs(platform_votes - code_votes)
+    weight = min(MEMORY_WEIGHT_CAP, MEMORY_WEIGHT_PER_INCIDENT * lead)
+    influencing = by_class[side]
+    signals["memory_influenced"] = influencing
+
+    example = next(
+        (
+            m.get("text", "")
+            for m in memories
+            if (m.get("incident_id") or m.get("id")) in influencing and m.get("text")
+        ),
+        "",
+    )
+    evidence.append(
+        f"[memory +{weight:.1f}] {len(influencing)} similar past incident(s) were "
+        f"{side}-level failures"
+        + (f" - e.g. \"{example[:160]}\"" if example else "")
+        + "."
+    )
+    if side == "platform":
+        platform_score += weight
+    else:
+        code_score += weight
+    return platform_score, code_score, signals
 
 
 def _verdict(

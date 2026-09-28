@@ -88,6 +88,9 @@ class Job:
 
     pipeline_health: dict[str, Any] = field(default_factory=dict)
     repo_health: dict[str, Any] = field(default_factory=dict)
+    # Persistent-memory activity for this run: recall results before
+    # diagnosis, which incidents influenced it, and whether it was retained.
+    memory: dict[str, Any] = field(default_factory=dict)
     score: dict[str, Any] = field(default_factory=dict)
     incident_report: str = ""
     branch_url: str | None = None
@@ -256,6 +259,10 @@ class Job:
         self.repo_health = health
         self._publish("repo_health", health)
 
+    def set_memory(self, memory: dict[str, Any]) -> None:
+        self.memory = memory
+        self._publish("memory", memory)
+
     def set_score(self, score: dict[str, Any]) -> None:
         self.score = score
         self._publish("score", score)
@@ -314,6 +321,7 @@ class Job:
                 "remediations": [step.to_dict() for step in self.remediations],
                 "pipeline_health": self.pipeline_health,
                 "repo_health": self.repo_health,
+                "memory": self.memory,
                 "score": self.score,
                 "incident_report": self.incident_report,
                 "branch_url": self.branch_url,

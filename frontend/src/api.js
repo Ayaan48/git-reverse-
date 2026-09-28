@@ -93,7 +93,7 @@ export function subscribeToJob(jobId, { onSnapshot, onEvent, onError }) {
     };
 
     ["snapshot", "log", "phase", "progress", "problems", "fix", "validation",
-     "diagnosis", "remediation", "pipeline_health", "repo_health", "score",
+     "diagnosis", "remediation", "pipeline_health", "repo_health", "score", "memory",
      "heartbeat", "done"].forEach((name) => {
       source.addEventListener(name, (message) => {
         lastActivity = Date.now();

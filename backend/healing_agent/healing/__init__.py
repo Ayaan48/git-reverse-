@@ -40,6 +40,7 @@ def heal(
     round_index: int = 1,
     use_ai: bool = True,
     on_progress=None,
+    memory_context: str = "",
 ) -> HealOutcome:
     """Repair `problems` in the checkout at `root`.
 
@@ -71,6 +72,7 @@ def heal(
         settings,
         round_index=round_index,
         on_progress=on_progress,
+        memory_context=memory_context,
     )
     outcome.fixes.extend(ai_outcome.fixes)
     outcome.ai_attempted = ai_outcome.attempted

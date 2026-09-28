@@ -26,6 +26,7 @@ from .analysis import ruff_available
 from .cicd import fetch_platform_status
 from .config import get_settings
 from .jobstore import event_stream, get_store
+from .memory import get_memory_service
 from .models import (
     AnalyzeAccepted,
     AnalyzeRequest,
@@ -80,6 +81,9 @@ async def health() -> HealthResponse:
     surfacing as a confusing failure mid-run.
     """
     store = get_store()
+    # Memory is optional, so it reports its state here but never marks the
+    # service degraded. Pinged off the event loop: the client blocks.
+    memory = await asyncio.to_thread(get_memory_service().ping)
     checks: dict[str, Any] = {
         "job_store": "ok",
         "active_jobs": store.active_count(),
@@ -90,6 +94,12 @@ async def health() -> HealthResponse:
         "ai_repair_tier": settings.ai_enabled,
         "workspace_writable": settings.workspace_root.exists(),
         "test_execution_allowed": settings.allow_test_execution,
+        "memory": {
+            "enabled": memory["enabled"],
+            "connected": memory["connected"],
+            "bank_id": memory["bank_id"],
+            "detail": memory.get("error") or memory.get("disabled_reason"),
+        },
     }
     degraded = not checks["workspace_writable"] or not checks["ruff"]
     return HealthResponse(

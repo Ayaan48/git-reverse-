@@ -21,6 +21,10 @@ def main() -> None:
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args()
 
+    from healing_agent.config import load_env_file
+
+    load_env_file(Path(__file__).resolve().parent.parent / ".env")
+
     import uvicorn
 
     uvicorn.run(
