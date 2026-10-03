@@ -384,6 +384,11 @@ def run_pipeline(
                 job.log(f"  {note}", "warn")
             if outcome.ai_skipped_reason:
                 job.log(f"  AI tier: {outcome.ai_skipped_reason}", "warn")
+            if outcome.models_used:
+                job.log(
+                    "  AI repairs by model: "
+                    + ", ".join(f"{m} x{n}" for m, n in outcome.models_used.items())
+                )
 
             job.set_phase(Phase.VALIDATING, f"Validating round {round_index}")
             validation = run_validation(

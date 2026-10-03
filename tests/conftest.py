@@ -70,6 +70,8 @@ def _memory_offline(monkeypatch):
     from healing_agent.memory import reset_memory_service
 
     monkeypatch.delenv("HINDSIGHT_API_KEY", raising=False)
+    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
     reset_memory_service()
     yield
     reset_memory_service()

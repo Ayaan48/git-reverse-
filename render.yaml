@@ -20,6 +20,10 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
 
+      # Optional second AI model; used as a fallback when Claude is unavailable.
+      - key: GEMINI_API_KEY
+        sync: false
+
       # Optional persistent incident memory (Hindsight). Leave the key unset
       # to run without memory.
       - key: HINDSIGHT_API_KEY

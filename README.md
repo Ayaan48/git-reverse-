@@ -92,6 +92,33 @@ cp .env.example .env      # then edit
 
 ---
 
+## AI repair models (Claude and Gemini)
+
+The AI tier handles what the rule-based tier cannot. It can use **Claude**,
+**Gemini**, or both. Set either key; with both, Claude goes first and Gemini is
+the fallback (`HEALING_AGENT_PROVIDER` changes the order). With neither, the
+agent still runs and applies every rule-based repair.
+
+- **Same trust for both.** A Gemini repair faces the identical gate as a Claude
+  one: it must parse, strictly reduce the file's problem count, and keep every
+  function and class, or the file is restored. The report credits the model
+  that made each repair (`via gemini-2.5-flash`).
+- **Failures are classified.** A *fatal* failure (no credit, bad key, retired
+  model, quota exhausted) retires that model for the rest of the run, so one
+  empty account costs one failed call rather than one per file, and the next
+  model takes over. A one-off failure (a refusal, a truncated answer, a 5xx)
+  only affects that file.
+- **It keeps checking.** A background monitor re-verifies every configured
+  model each `HEALING_AGENT_MODEL_CHECK_SECONDS`, logs a warning the moment one
+  starts failing (and an info line when it recovers), and publishes the result
+  in `GET /api/health` under `checks.ai_models`. The dashboard shows a
+  Claude / Gemini pill per model and a banner with the provider's own error,
+  such as an empty balance, before you start a run rather than after it fails.
+- **No new dependency.** Gemini is called over HTTPS with `httpx`, which the
+  project already uses, and the key travels in a header, never in a URL.
+
+---
+
 ## Incident memory (Hindsight)
 
 Without memory, every failure is diagnosed from scratch. With it, the agent
@@ -195,7 +222,12 @@ confusing mid-run failure.
   "status": "ok",
   "version": "1.0.0",
   "checks": {
-    "git_binary": true, "ruff": true, "ai_repair_tier": false,
+    "git_binary": true, "ruff": true, "ai_repair_tier": true,
+    "ai_models": [
+      { "provider": "anthropic", "model": "claude-opus-5", "ok": false,
+        "detail": "Your credit balance is too low to access the Anthropic API." },
+      { "provider": "gemini", "model": "gemini-2.5-flash", "ok": true, "detail": "responding" }
+    ],
     "memory": { "enabled": true, "connected": true, "bank_id": "cicd-healing-agent" }
   },
   "config": { "repo_backend": "git-cli", "model": "claude-opus-5" }
@@ -287,6 +319,11 @@ Anything else is rolled back to the original file.
 That last check exists because problem count alone is a corruptible objective:
 deleting the offending function drives it to zero. Deletion is an automatic
 rejection, not a winning strategy.
+
+The same gate rejects a rewrite that silently deletes a docstring it was not
+asked to touch. Live testing found Gemini dropping the module docstring on
+line 1 while fixing three unrelated lines; the problem count cannot see that,
+so the gate checks for it directly.
 
 **Your token never leaks.** It is held in memory for the run only, never written
 to the job record, and every log line, event, error, and API response is passed
@@ -403,7 +440,11 @@ silently breaking things.
 | Variable | Default | Purpose |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Enables the AI repair tier. Optional. |
-| `HEALING_AGENT_MODEL` | `claude-opus-5` | Model for repair and diagnosis |
+| `GEMINI_API_KEY` | — | Second AI model for repairs: fallback for Claude, or used alone. Optional. |
+| `HEALING_AGENT_GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model id (configurable because Google retires ids) |
+| `HEALING_AGENT_PROVIDER` | `auto` | `auto` (Claude, then Gemini), `anthropic`, or `gemini` |
+| `HEALING_AGENT_MODEL_CHECK_SECONDS` | `300` | How often the background monitor re-checks each AI model (min 30) |
+| `HEALING_AGENT_MODEL` | `claude-opus-5` | Claude model for repair and diagnosis |
 | `HEALING_AGENT_EFFORT` | `high` | `low` … `max` |
 | `GITHUB_TOKEN` | — | Fallback token for local development |
 | `HEALING_AGENT_WORKSPACE` | `.workspaces` | Checkout directory; falls back to `/tmp` if read-only |
@@ -446,7 +487,7 @@ backend/healing_agent/
   redaction.py            Secret scrubbing
 frontend/src/             React dashboard (Vite)
 scripts/                  setup_memory_bank.py, seed_memory.py
-tests/                    80 tests
+tests/                    110 tests
 ```
 
 ---

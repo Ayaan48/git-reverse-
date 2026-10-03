@@ -11,7 +11,9 @@ final report, but everything the agent does is driven by /api/analyze.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
 import shutil
 import time
 from pathlib import Path
@@ -25,6 +27,7 @@ from . import __version__
 from .analysis import ruff_available
 from .cicd import fetch_platform_status
 from .config import get_settings
+from .healing.providers import cached_model_status, check_models
 from .jobstore import event_stream, get_store
 from .memory import get_memory_service
 from .models import (
@@ -37,6 +40,33 @@ from .pipeline import run_pipeline
 from .redaction import register_secret, scrub
 
 STARTED_AT = time.time()
+log = logging.getLogger(__name__)
+
+
+async def _monitor_models(interval: int) -> None:
+    """Keep re-verifying each AI model so a dead key or empty balance is
+    noticed (and logged) when it happens, not when a repair run fails."""
+    while True:
+        try:
+            await asyncio.to_thread(check_models, get_settings())
+        except Exception:  # noqa: BLE001 - the monitor must never die
+            log.exception("model health check crashed; will retry")
+        await asyncio.sleep(interval)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_: FastAPI):
+    task = None
+    current = get_settings()
+    if current.ai_enabled:
+        task = asyncio.create_task(_monitor_models(current.model_check_seconds))
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 app = FastAPI(
     title="Autonomous CI/CD Healing Agent",
@@ -47,6 +77,7 @@ app = FastAPI(
         "platform-level and responding to each appropriately."
     ),
     version=__version__,
+    lifespan=lifespan,
 )
 
 settings = get_settings()
@@ -84,6 +115,9 @@ async def health() -> HealthResponse:
     # Memory is optional, so it reports its state here but never marks the
     # service degraded. Pinged off the event loop: the client blocks.
     memory = await asyncio.to_thread(get_memory_service().ping)
+    # Live model status, refreshed by the background monitor (and on demand
+    # here when stale), so the dashboard can say "Claude: no credit" up front.
+    models = await asyncio.to_thread(cached_model_status, settings)
     checks: dict[str, Any] = {
         "job_store": "ok",
         "active_jobs": store.active_count(),
@@ -92,6 +126,7 @@ async def health() -> HealthResponse:
         "node_binary": bool(shutil.which("node")),
         "ruff": ruff_available(),
         "ai_repair_tier": settings.ai_enabled,
+        "ai_models": [m.to_dict() for m in models],
         "workspace_writable": settings.workspace_root.exists(),
         "test_execution_allowed": settings.allow_test_execution,
         "memory": {

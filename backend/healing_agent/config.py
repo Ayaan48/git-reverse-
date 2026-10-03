@@ -94,6 +94,31 @@ class Settings:
     effort: str = field(
         default_factory=lambda: os.environ.get("HEALING_AGENT_EFFORT", "high")
     )
+    # Second repair provider. Used alongside (or instead of) Claude; see
+    # HEALING_AGENT_PROVIDER for the order. The model name is configurable
+    # because Google retires model ids on its own schedule.
+    gemini_api_key: str | None = field(
+        default_factory=lambda: os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+        or None
+    )
+    gemini_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "HEALING_AGENT_GEMINI_MODEL", "gemini-2.5-flash"
+        )
+    )
+    # auto = Claude first, Gemini as fallback | anthropic | gemini
+    ai_provider: str = field(
+        default_factory=lambda: os.environ.get("HEALING_AGENT_PROVIDER", "auto")
+        .strip()
+        .lower()
+    )
+    # How often the background monitor re-verifies each configured model.
+    model_check_seconds: int = field(
+        default_factory=lambda: max(
+            30, _env_int("HEALING_AGENT_MODEL_CHECK_SECONDS", 300)
+        )
+    )
     fallback_github_token: str | None = field(
         default_factory=lambda: os.environ.get("GITHUB_TOKEN")
         or os.environ.get("GH_TOKEN")
@@ -135,7 +160,8 @@ class Settings:
 
     @property
     def ai_enabled(self) -> bool:
-        return bool(self.anthropic_api_key)
+        """True when at least one AI provider has a key configured."""
+        return bool(self.anthropic_api_key or self.gemini_api_key)
 
     @property
     def git_cli_available(self) -> bool:
@@ -147,6 +173,9 @@ class Settings:
             "model": self.model,
             "effort": self.effort,
             "ai_enabled": self.ai_enabled,
+            "ai_provider": self.ai_provider,
+            "gemini_model": self.gemini_model,
+            "model_check_seconds": self.model_check_seconds,
             "git_cli_available": self.git_cli_available,
             "repo_backend": "git-cli" if self.git_cli_available else "github-api",
             "workspace_root": str(self.workspace_root),

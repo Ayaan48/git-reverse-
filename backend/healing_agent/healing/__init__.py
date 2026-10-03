@@ -31,6 +31,7 @@ class HealOutcome:
     ai_rejected: int = 0
     notes: list[str] = field(default_factory=list)
     ai_skipped_reason: str | None = None
+    models_used: dict[str, int] = field(default_factory=dict)
 
 
 def heal(
@@ -80,4 +81,5 @@ def heal(
     outcome.ai_rejected = ai_outcome.rejected
     outcome.notes.extend(ai_outcome.notes)
     outcome.ai_skipped_reason = ai_outcome.skipped_reason
+    outcome.models_used = ai_outcome.models_used
     return outcome
