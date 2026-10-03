@@ -41,6 +41,23 @@ verdict, and responds differently to each case.
 
 Requires **Python 3.11+** and **Node 18+**.
 
+### One command
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start.ps1    # Windows
+```
+```bash
+./scripts/start.sh                                            # macOS / Linux
+```
+
+Installs dependencies, builds the dashboard, and serves the UI and the API
+from a single process on http://127.0.0.1:8000 — one terminal, no proxy.
+Pass a port to override (`start.sh 9000`, `start.ps1 -Port 9000`), or
+`-SkipBuild` / `SKIP_BUILD=1` to skip the frontend build on a rerun.
+
+The two-terminal setup below is still the one to use while developing the
+frontend, since Vite's dev server gives you hot reload.
+
 ### macOS / Linux
 
 ```bash
