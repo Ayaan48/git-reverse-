@@ -41,9 +41,15 @@ if (-not $SkipBuild) {
     if (-not (Test-Path frontend/dist/index.html)) { throw "Frontend build produced no output." }
 }
 
-$env:PYTHONPATH = Join-Path $root "backend"
+# run.py loads .env from the repo root (API keys, memory, model settings) before
+# starting uvicorn; launching uvicorn directly would silently ignore that file.
+if (Test-Path (Join-Path $root ".env")) {
+    Write-Host "Loading settings from .env" -ForegroundColor Cyan
+} else {
+    Write-Host "No .env found - running without API keys (copy .env.example to .env)" -ForegroundColor Yellow
+}
 $url = "http://127.0.0.1:$Port"
 Write-Host "`nServing dashboard and API on $url  (Ctrl+C to stop)`n" -ForegroundColor Green
 Start-Job { Start-Sleep 3; Start-Process $using:url } | Out-Null
 
-& $py -m uvicorn healing_agent.app:app --host 127.0.0.1 --port $Port
+& $py backend/run.py --port $Port

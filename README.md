@@ -51,7 +51,9 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1    # Windows
 ```
 
 Installs dependencies, builds the dashboard, and serves the UI and the API
-from a single process on http://127.0.0.1:8000 — one terminal, no proxy.
+from a single process on http://127.0.0.1:8000 — one terminal, no proxy. It
+reads your API keys and settings from `.env` in the repo root (copy
+`.env.example` to start); real environment variables take precedence.
 Pass a port to override (`start.sh 9000`, `start.ps1 -Port 9000`), or
 `-SkipBuild` / `SKIP_BUILD=1` to skip the frontend build on a rerun.
 

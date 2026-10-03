@@ -27,5 +27,7 @@ fi
 echo
 echo "Serving dashboard and API on http://127.0.0.1:${PORT}  (Ctrl+C to stop)"
 echo
-PYTHONPATH="$ROOT/backend" exec python3 -m uvicorn healing_agent.app:app \
-  --host 127.0.0.1 --port "$PORT"
+# run.py loads .env from the repo root (API keys, memory, model settings) before
+# starting uvicorn; launching uvicorn directly would silently ignore that file.
+if [ -f .env ]; then echo "Loading settings from .env"; else echo "No .env found - running without API keys (copy .env.example to .env)"; fi
+exec python3 backend/run.py --port "$PORT"
