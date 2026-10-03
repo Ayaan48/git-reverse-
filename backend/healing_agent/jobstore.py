@@ -37,6 +37,7 @@ _PHASE_PROGRESS: dict[Phase, int] = {
     Phase.HEALING: 60,
     Phase.VALIDATING: 78,
     Phase.PUSHING: 90,
+    Phase.VERIFYING: 93,
     Phase.REPORTING: 96,
     Phase.DONE: 100,
 }
@@ -72,6 +73,8 @@ class Job:
     author_name: str
     branch_name: str
     base_branch: str | None = None
+    # What started the run: the dashboard, or e.g. a GitHub Actions trigger.
+    trigger: str | None = None
 
     status: JobStatus = JobStatus.QUEUED
     phase: Phase = Phase.QUEUED
@@ -91,6 +94,8 @@ class Job:
     # Persistent-memory activity for this run: recall results before
     # diagnosis, which incidents influenced it, and whether it was retained.
     memory: dict[str, Any] = field(default_factory=dict)
+    # Result of watching the repository's real CI on the healing commit.
+    ci_verification: dict[str, Any] = field(default_factory=dict)
     score: dict[str, Any] = field(default_factory=dict)
     incident_report: str = ""
     branch_url: str | None = None
@@ -259,6 +264,14 @@ class Job:
         self.repo_health = health
         self._publish("repo_health", health)
 
+    def set_pull_request(self, url: str) -> None:
+        self.pull_request_url = url
+        self._publish("pull_request", {"url": url})
+
+    def set_ci_verification(self, verification: dict[str, Any]) -> None:
+        self.ci_verification = verification
+        self._publish("ci", verification)
+
     def set_memory(self, memory: dict[str, Any]) -> None:
         self.memory = memory
         self._publish("memory", memory)
@@ -303,6 +316,7 @@ class Job:
                 "author_name": self.author_name,
                 "branch_name": self.branch_name,
                 "base_branch": self.base_branch,
+                "trigger": self.trigger,
                 "created_at": self.created_at,
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
@@ -322,6 +336,7 @@ class Job:
                 "pipeline_health": self.pipeline_health,
                 "repo_health": self.repo_health,
                 "memory": self.memory,
+                "ci_verification": self.ci_verification,
                 "score": self.score,
                 "incident_report": self.incident_report,
                 "branch_url": self.branch_url,

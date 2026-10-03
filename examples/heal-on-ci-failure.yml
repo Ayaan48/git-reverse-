@@ -1,0 +1,139 @@
+# Heal failed CI automatically with the Autonomous CI/CD Healing Agent.
+#
+# Copy this file into the repository you want healed, as
+# .github/workflows/heal.yml on its default branch, then add one secret
+# (Settings -> Secrets and variables -> Actions):
+#
+#   HEALING_AGENT_TOKEN   a GitHub token that can push branches and open pull
+#                         requests in this repository. Classic token: `repo`
+#                         and `workflow` scopes. Fine-grained token: Contents,
+#                         Pull requests and Workflows read & write, Actions read.
+#
+# Optional repository variables:
+#   HEALING_AGENT_URL     the agent's address (default: the public deployment)
+#   HEALING_AGENT_AUTHOR  commit author name for healing commits (default: owner)
+#
+# What happens: when the workflow named under `workflows:` fails on a push, this
+# job wakes the agent, starts a healing run on the failing branch and waits for
+# it. The agent pushes a heal/... branch, opens a pull request, checks its fix
+# in this repository's real CI, and records the incident in memory. It never
+# merges. On a run's first failure it may also re-run failed jobs when it
+# diagnoses a platform problem (an outage, a rate limit, no free runner).
+#
+# A personal token is needed instead of GITHUB_TOKEN because GitHub does not
+# start CI for pull requests opened with GITHUB_TOKEN, and the agent needs that
+# CI run to verify its fix.
+
+name: Heal failed CI
+
+on:
+  workflow_run:
+    workflows: ["CI"]   # the name of the workflow to watch
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heal-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  heal:
+    # Only failed runs started by a push, and never the agent's own branches,
+    # so a failing healing branch can't start another healing run.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'push' &&
+      !startsWith(github.event.workflow_run.head_branch, 'heal/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AGENT_URL: ${{ vars.HEALING_AGENT_URL || 'https://cicd-healing-agent.onrender.com' }}
+    steps:
+      - name: Wake the healing agent
+        run: |
+          # A free instance sleeps when idle and takes about a minute to wake.
+          for attempt in $(seq 1 18); do
+            if curl -fsS -m 20 "$AGENT_URL/api/health" > /dev/null; then
+              echo "Healing agent is up."
+              exit 0
+            fi
+            echo "Waiting for the agent to wake up ($attempt/18)..."
+            sleep 10
+          done
+          echo "::error::The healing agent at $AGENT_URL did not respond."
+          exit 1
+
+      - name: Start a healing run
+        id: start
+        env:
+          HEAL_TOKEN: ${{ secrets.HEALING_AGENT_TOKEN }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BASE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAL_BRANCH: heal/ci-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          AUTHOR: ${{ vars.HEALING_AGENT_AUTHOR || github.repository_owner }}
+          FIRST_ATTEMPT: ${{ github.event.workflow_run.run_attempt == 1 }}
+          TRIGGER: "GitHub Actions: ${{ github.event.workflow_run.name }} run #${{ github.event.workflow_run.run_number }} failed on ${{ github.event.workflow_run.head_branch }}"
+        run: |
+          if [ -z "$HEAL_TOKEN" ]; then
+            echo "::error::Add a HEALING_AGENT_TOKEN repository secret first."
+            exit 1
+          fi
+          body=$(jq -n \
+            --arg repo "$REPO_URL" --arg base "$BASE_BRANCH" --arg branch "$HEAL_BRANCH" \
+            --arg author "$AUTHOR" --arg token "$HEAL_TOKEN" --arg trigger "$TRIGGER" \
+            --argjson rerun "$FIRST_ATTEMPT" \
+            '{repo_url: $repo, base_branch: $base, branch_name: $branch,
+              author_name: $author, github_token: $token, trigger: $trigger,
+              push: true, open_pull_request: true, verify_in_ci: true,
+              execute_remediation: $rerun, run_tests: false}')
+          response=$(curl -fsS -m 60 -X POST "$AGENT_URL/api/analyze" \
+            -H "Content-Type: application/json" -d "$body")
+          job_id=$(echo "$response" | jq -r .job_id)
+          echo "job_id=$job_id" >> "$GITHUB_OUTPUT"
+          echo "Started healing job $job_id: $BASE_BRANCH -> $HEAL_BRANCH"
+
+      - name: Wait for the agent to finish
+        env:
+          JOB_ID: ${{ steps.start.outputs.job_id }}
+        run: |
+          status="unknown"
+          for attempt in $(seq 1 120); do
+            if snapshot=$(curl -fsS -m 30 "$AGENT_URL/api/jobs/$JOB_ID"); then
+              echo "$snapshot" > job.json
+              status=$(jq -r .status job.json)
+              echo "Agent status: $status ($(jq -r .phase job.json))"
+              case "$status" in succeeded|partial|failed|cancelled) break ;; esac
+            else
+              echo "Agent unreachable, retrying..."
+            fi
+            sleep 10
+          done
+
+          echo "::group::Agent log"
+          jq -r '.logs[] | "[\(.phase)] \(.message)"' job.json
+          echo "::endgroup::"
+
+          {
+            echo "## Healing agent result"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            jq -r '
+              "| Status | \(.status) |",
+              "| Diagnosis | \(.diagnosis.failure_class // "n/a") (\(((.diagnosis.confidence // 0) * 100) | floor)% confidence) |",
+              "| Problems found / fixes applied | \(.problems_found) / \(.fixes_applied) |",
+              "| Agent validation | \(if .validation_passed then "passed" else "failed" end) |",
+              "| Real CI on the fix | \(.ci_verification.status // "not checked") |",
+              "| Memory | \(.memory.incidents_found // 0) similar past incident(s) recalled |",
+              "| Score | \(.score.total // "n/a")/100 |",
+              "| Pull request | \(.pull_request_url // "none") |"' job.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          pr=$(jq -r '.pull_request_url // empty' job.json)
+          if [ -n "$pr" ]; then echo "Pull request: $pr"; fi
+          if [ "$status" = "failed" ]; then
+            echo "::error::The healing run failed: $(jq -r '.error // "see the agent log"' job.json)"
+            exit 1
+          fi

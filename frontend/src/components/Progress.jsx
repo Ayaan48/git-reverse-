@@ -2,14 +2,17 @@ import React from "react";
 
 const PHASES = [
   "queued", "cloning", "scanning", "diagnosing",
-  "healing", "validating", "pushing", "reporting", "done",
+  "healing", "validating", "pushing", "verifying", "reporting", "done",
 ];
 
 export default function Progress({ job, elapsed }) {
   const phase = job?.phase ?? "queued";
   const progress = job?.progress ?? 0;
   const status = job?.status ?? "queued";
-  const index = PHASES.indexOf(phase);
+  // "verifying" only appears for runs that wait on real CI.
+  const verifies = phase === "verifying" || Boolean(job?.ci_verification?.status);
+  const phases = verifies ? PHASES : PHASES.filter((name) => name !== "verifying");
+  const index = phases.indexOf(phase);
 
   const running = status === "queued" || status === "running";
   const fillClass = [
@@ -40,7 +43,7 @@ export default function Progress({ job, elapsed }) {
         <div className={`progress-fill ${fillClass}`} style={{ width: `${progress}%` }} />
       </div>
       <div className="phases">
-        {PHASES.slice(0, -1).map((name, position) => (
+        {phases.slice(0, -1).map((name, position) => (
           <span
             key={name}
             className={`phase-chip ${

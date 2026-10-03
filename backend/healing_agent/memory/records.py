@@ -102,6 +102,8 @@ def build_incident_record(
     telemetry: PipelineTelemetry | None,
     log_text: str = "",
     timestamp: datetime | None = None,
+    ci_verification: dict[str, Any] | None = None,
+    pull_request_url: str | None = None,
 ) -> dict[str, Any]:
     """Structured post-incident data handed to HindsightService.retain()."""
     passed_rounds = {run.round_index for run in validations if run.passed}
@@ -142,4 +144,10 @@ def build_incident_record(
             f"{step.action.value} - {step.description}" for step in remediations
         ],
         "outcome": outcome,
+        "ci_verification": (
+            {"status": ci_verification.get("status"), "detail": ci_verification.get("detail")}
+            if ci_verification
+            else None
+        ),
+        "pull_request_url": pull_request_url,
     }

@@ -191,6 +191,7 @@ async def analyze(payload: AnalyzeRequest) -> AnalyzeAccepted:
         author_name=payload.author_name,
         branch_name=payload.branch_name,
         base_branch=payload.base_branch,
+        trigger=payload.trigger,
     )
     job.bind_loop(asyncio.get_running_loop())
     job.log(
@@ -247,6 +248,9 @@ async def list_jobs(limit: int = 20) -> dict[str, Any]:
                 "elapsed_seconds": round(job.elapsed_seconds, 2),
                 "score": job.score.get("total"),
                 "created_at": job.created_at,
+                "trigger": job.trigger,
+                "pull_request_url": job.pull_request_url,
+                "ci": job.ci_verification.get("status"),
             }
             for job in store.list(limit=min(limit, 50))
         ]

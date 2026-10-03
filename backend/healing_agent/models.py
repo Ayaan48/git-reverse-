@@ -52,6 +52,7 @@ class Phase(str, Enum):
     HEALING = "healing"
     VALIDATING = "validating"
     PUSHING = "pushing"
+    VERIFYING = "verifying"
     REPORTING = "reporting"
     DONE = "done"
 
@@ -144,7 +145,37 @@ class AnalyzeRequest(BaseModel):
     )
     use_ai: bool = Field(
         default=True,
-        description="Allow the AI repair tier (requires ANTHROPIC_API_KEY).",
+        description="Allow the AI repair tier (requires an AI provider key).",
+    )
+    open_pull_request: bool = Field(
+        default=False,
+        description=(
+            "After pushing, open a pull request from the healing branch into "
+            "the base branch. The agent never merges it."
+        ),
+    )
+    verify_in_ci: bool = Field(
+        default=False,
+        description=(
+            "After pushing, wait for the repository's own GitHub Actions runs "
+            "on the healing commit and record whether real CI passed."
+        ),
+    )
+    execute_remediation: bool = Field(
+        default=False,
+        description=(
+            "Allow live pipeline actions: re-run the failed jobs (with "
+            "backoff) when the failure is diagnosed as a platform problem. "
+            "Code changes always go to a branch regardless."
+        ),
+    )
+    trigger: str | None = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "Free-text label for what started this run, e.g. 'GitHub Actions: "
+            "CI run 123 failed'. Shown on the dashboard and in the report."
+        ),
     )
 
     @field_validator("repo_url")

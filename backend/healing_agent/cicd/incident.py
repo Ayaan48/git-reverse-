@@ -50,6 +50,9 @@ def build_incident_report(
     score: dict[str, Any],
     branch_url: str | None = None,
     memory: dict[str, Any] | None = None,
+    pull_request_url: str | None = None,
+    ci_verification: dict[str, Any] | None = None,
+    trigger: str | None = None,
 ) -> str:
     """Render the auto-generated post-incident report as Markdown."""
     lines: list[str] = []
@@ -60,7 +63,11 @@ def build_incident_report(
     add(f"**Generated:** {_timestamp()}  ")
     add(f"**Duration:** {elapsed_seconds:.1f}s  ")
     if branch:
-        add(f"**Healing branch:** `{branch}`" + (f" - {branch_url}" if branch_url else ""))
+        add(f"**Healing branch:** `{branch}`" + (f" - {branch_url}" if branch_url else "") + "  ")
+    if pull_request_url:
+        add(f"**Pull request:** {pull_request_url}  ")
+    if trigger:
+        add(f"**Triggered by:** {trigger}  ")
     add("")
 
     # ---------------------------------------------------------------- verdict
@@ -189,6 +196,21 @@ def build_incident_report(
                 mark = "skipped" if stage.skipped else ("pass" if stage.passed else "**fail**")
                 detail = stage.detail.replace("|", "\\|")[:110]
                 add(f"| `{stage.name}` | {mark} | {stage.duration_ms}ms | {detail} |")
+            add("")
+    if ci_verification:
+        label = {
+            "passed": "PASSED", "failed": "FAILED", "no_ci": "did not run",
+            "timed_out": "still running at the deadline", "error": "could not be read",
+        }.get(ci_verification.get("status", ""), ci_verification.get("status", "unknown"))
+        add(f"### Real CI on the healing commit: {label}")
+        add("")
+        add(str(ci_verification.get("detail") or ""))
+        add("")
+        for run in ci_verification.get("runs") or []:
+            outcome = run.get("conclusion") or run.get("status") or "unknown"
+            link = f" - {run['url']}" if run.get("url") else ""
+            add(f"- `{run.get('name', 'workflow')}`: {outcome}{link}")
+        if ci_verification.get("runs"):
             add("")
 
     # ---------------------------------------------------------- remediation

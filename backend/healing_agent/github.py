@@ -254,11 +254,18 @@ class GitHubClient:
 
     # -------------------------------------------------------------- workflows
     def list_workflow_runs(
-        self, owner: str, repo: str, per_page: int = 30, branch: str | None = None
+        self,
+        owner: str,
+        repo: str,
+        per_page: int = 30,
+        branch: str | None = None,
+        head_sha: str | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {"per_page": per_page}
         if branch:
             params["branch"] = branch
+        if head_sha:
+            params["head_sha"] = head_sha
         return self.request(
             "GET", f"/repos/{owner}/{repo}/actions/runs", params=params
         ) or {}

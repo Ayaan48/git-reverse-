@@ -641,3 +641,23 @@ td.wrap { word-break: break-word; min-width: 220px; }
     scroll-behavior: auto !important;
   }
 }
+
+/* ------------------------------------------------------------ recent runs */
+.runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.run-item {
+  width: 100%; text-align: left; display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  font: inherit;
+}
+.run-item:hover { border-color: var(--accent); }
+.run-item.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.run-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.run-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
+.run-repo { font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.run-meta { font-size: 0.74rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- real CI */
+.ci-result { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.ci-detail { font-size: 0.8rem; color: var(--text-secondary); flex: 1 1 16rem; min-width: 0; }
+.ci-result a { font-size: 0.76rem; }

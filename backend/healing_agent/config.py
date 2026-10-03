@@ -113,6 +113,11 @@ class Settings:
         .strip()
         .lower()
     )
+    # How long a run waits for the repository's real CI on the healing commit
+    # (only when verify_in_ci is requested). Keep it under the job timeout.
+    ci_wait_seconds: int = field(
+        default_factory=lambda: max(30, _env_int("HEALING_AGENT_CI_WAIT_SECONDS", 300))
+    )
     # How often the background monitor re-verifies each configured model.
     model_check_seconds: int = field(
         default_factory=lambda: max(
@@ -176,6 +181,7 @@ class Settings:
             "ai_provider": self.ai_provider,
             "gemini_model": self.gemini_model,
             "model_check_seconds": self.model_check_seconds,
+            "ci_wait_seconds": self.ci_wait_seconds,
             "git_cli_available": self.git_cli_available,
             "repo_backend": "git-cli" if self.git_cli_available else "github-api",
             "workspace_root": str(self.workspace_root),

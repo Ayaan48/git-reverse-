@@ -33,7 +33,8 @@ verdict, and responds differently to each case.
 | **Diagnose** | Reads Actions telemetry (failure rate, queue latency, stuck jobs, failing steps) and the provider status page, then classifies the failure as `code`, `platform`, `mixed`, or `unknown` — with every contributing signal and its weight recorded. |
 | **Heal** | Applies deterministic repairs first, then model-generated ones. Every model patch must parse **and** reduce that file's problem count **and** preserve every function and class it defined, or it is rolled back. |
 | **Validate** | Runs `syntax → imports → lint → compile → tests` gates, looping heal/validate until they pass or no further repair is possible. |
-| **Communicate** | Pushes the branch, returns the link, and writes an auto-generated post-incident report with root cause, evidence, repairs, and gate results. |
+| **Communicate** | Pushes the branch, opens a pull request, checks the fix in the repository's real CI, and writes an auto-generated post-incident report with root cause, evidence, repairs, and gate results. |
+| **Run itself** | With the included GitHub Actions trigger, all of the above starts on its own whenever a repository's CI fails. See [Working on its own](#working-on-its-own). |
 
 ---
 
@@ -108,6 +109,53 @@ enable model-generated repairs for defects that need reasoning.
 ```bash
 cp .env.example .env      # then edit
 ```
+
+---
+
+## Working on its own
+
+By default a person starts a run from the dashboard. With the trigger
+workflow in `examples/heal-on-ci-failure.yml`, no one has to: when a
+repository's CI fails, GitHub starts the agent itself.
+
+```
+push breaks CI  ->  "Heal failed CI" workflow wakes the agent
+                ->  agent diagnoses, repairs and validates
+                ->  pushes heal/ci-<run>-<attempt> and opens a pull request
+                ->  waits for the repository's real CI on its fix
+                ->  records the verdict in the report and in memory
+```
+
+The job's summary in the Actions tab shows the verdict, the fixes, the real-CI
+result and the pull request link, and the full agent log is in the job output.
+
+**Set it up in a repository**
+
+1. Copy `examples/heal-on-ci-failure.yml` to `.github/workflows/heal.yml` on
+   the default branch. Set `workflows: ["CI"]` to the name of the workflow to
+   watch.
+2. Add a repository secret `HEALING_AGENT_TOKEN`: a token that can push and
+   open pull requests (classic: `repo` and `workflow` scopes; fine-grained:
+   Contents, Pull requests and Workflows read and write, Actions read).
+   A personal token is needed because GitHub does not start CI for pull
+   requests opened with the built-in `GITHUB_TOKEN`, and the agent needs that
+   CI run to verify its fix.
+3. Optional repository variables: `HEALING_AGENT_URL` (defaults to the public
+   deployment) and `HEALING_AGENT_AUTHOR` (commit author for healing commits).
+
+**What keeps it safe**
+
+- It only reacts to failed runs started by a push, and never to its own
+  `heal/` branches, so a fix that fails CI cannot set off another healing run.
+- Code changes always go to a new branch and a pull request. The agent never
+  merges.
+- On a platform failure it may re-run the failed jobs (with backoff), but only
+  on a run's first failure, so a real outage cannot cause endless re-runs.
+- A fix that passes the agent's own gates but fails the repository's real CI
+  is reported as partial, not success, and remembered that way.
+
+The same options are available to anyone calling the API and from the
+dashboard's **Open pull request** and **Verify in real CI** checkboxes.
 
 ---
 
@@ -273,9 +321,13 @@ curl -X POST http://127.0.0.1:8000/api/analyze \
 | `repo_url` | yes | Any GitHub URL form: `https://`, `git@`, with or without `.git` |
 | `author_name` | yes | Recorded as the commit author |
 | `branch_name` | yes | Created by the agent; validated as a legal git ref |
-| `github_token` | to push | `repo` scope, or fine-grained *Contents: read & write* |
+| `github_token` | to push | `repo` scope, or fine-grained *Contents* (and *Pull requests* to open one): read & write |
 | `base_branch` | no | Defaults to the repository's default branch |
 | `push` / `run_tests` / `use_ai` | no | Default `true`; set `push:false` for a dry run |
+| `open_pull_request` | no | Default `false`. Open a pull request for the healing branch (never merged) |
+| `verify_in_ci` | no | Default `false`. Wait for the repository's own CI on the healing commit and record the result |
+| `execute_remediation` | no | Default `false`. Allow re-running failed jobs when the failure is diagnosed as a platform problem |
+| `trigger` | no | Label for what started the run, shown on the dashboard and in the report |
 
 Supporting endpoints: `GET /api/jobs/{id}` (snapshot), `GET /api/jobs/{id}/events`
 (SSE stream), `GET /api/jobs/{id}/report` (Markdown post-incident report),
@@ -463,6 +515,7 @@ silently breaking things.
 | `HEALING_AGENT_GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model id (configurable because Google retires ids) |
 | `HEALING_AGENT_PROVIDER` | `auto` | `auto` (Claude, then Gemini), `anthropic`, or `gemini` |
 | `HEALING_AGENT_MODEL_CHECK_SECONDS` | `300` | How often the background monitor re-checks each AI model (min 30) |
+| `HEALING_AGENT_CI_WAIT_SECONDS` | `300` | How long a run waits for real CI when `verify_in_ci` is on; keep it under the job timeout |
 | `HEALING_AGENT_MODEL` | `claude-opus-5` | Claude model for repair and diagnosis |
 | `HEALING_AGENT_EFFORT` | `high` | `low` … `max` |
 | `GITHUB_TOKEN` | — | Fallback token for local development |
@@ -505,8 +558,9 @@ backend/healing_agent/
   validation.py           CI/CD gate loop
   redaction.py            Secret scrubbing
 frontend/src/             React dashboard (Vite)
-scripts/                  setup_memory_bank.py, seed_memory.py
-tests/                    110 tests
+scripts/                  setup_memory_bank.py, seed_memory.py, start.sh, start.ps1
+examples/                 heal-on-ci-failure.yml: the trigger that makes it run on its own
+tests/                    127 tests
 ```
 
 ---

@@ -514,6 +514,25 @@ def format_incident(report: dict[str, Any]) -> str:
             + ("passed." if run.get("passed") else f"failed at {', '.join(failed) or 'unknown stage'}.")
         )
 
+    # The repository's own CI is the strongest evidence a repair really worked,
+    # so state it plainly: recall should prefer fixes proven in real CI.
+    ci = report.get("ci_verification") or {}
+    ci_status = ci.get("status")
+    if ci_status == "passed":
+        lines.append(
+            "Real CI on the healing commit passed: the repairs were proven in "
+            "the repository's own pipeline."
+        )
+    elif ci_status == "failed":
+        lines.append(
+            "Real CI on the healing commit FAILED: the repairs passed the "
+            "agent's own checks but not the repository's pipeline."
+        )
+    elif ci_status:
+        lines.append(f"Real CI result: {ci_status}. {ci.get('detail') or ''}".strip())
+    if report.get("pull_request_url"):
+        lines.append(f"Pull request: {report['pull_request_url']}.")
+
     lines.append(f"Final outcome: {report.get('outcome', 'unknown')}.")
     if report.get("notes"):
         lines.append(str(report["notes"]))

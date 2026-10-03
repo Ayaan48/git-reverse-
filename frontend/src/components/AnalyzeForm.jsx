@@ -11,6 +11,8 @@ const DEFAULTS = {
   token: "",
   baseBranch: "",
   push: true,
+  openPr: true,
+  verifyCi: true,
   runTests: true,
   useAi: true,
 };
@@ -63,6 +65,8 @@ export default function AnalyzeForm({ onStart, running }) {
       github_token: values.token.trim() || null,
       base_branch: values.baseBranch.trim() || null,
       push: values.push,
+      open_pull_request: values.push && values.openPr,
+      verify_in_ci: values.push && values.verifyCi,
       run_tests: values.runTests,
       use_ai: values.useAi,
     });
@@ -106,7 +110,7 @@ export default function AnalyzeForm({ onStart, running }) {
       {field("token", "GitHub token", {
         password: true,
         placeholder: "ghp_… or github_pat_…",
-        help: "Needs 'repo' scope, or fine-grained Contents: read & write.",
+        help: "Needs 'repo' scope, or fine-grained Contents and Pull requests: read & write.",
       })}
       {field("baseBranch", "Base branch (optional)", {
         placeholder: "defaults to the repository's default branch",
@@ -125,6 +129,14 @@ export default function AnalyzeForm({ onStart, running }) {
         <label>
           <input type="checkbox" checked={values.push} onChange={set("push")} disabled={running} />
           Push branch
+        </label>
+        <label>
+          <input type="checkbox" checked={values.openPr} onChange={set("openPr")} disabled={running || !values.push} />
+          Open pull request
+        </label>
+        <label>
+          <input type="checkbox" checked={values.verifyCi} onChange={set("verifyCi")} disabled={running || !values.push} />
+          Verify in real CI
         </label>
         <label>
           <input type="checkbox" checked={values.runTests} onChange={set("runTests")} disabled={running} />

@@ -29,6 +29,7 @@ async function request(path, options = {}) {
 export const getHealth = () => request("/api/health");
 export const getPlatformHealth = () => request("/api/health/platform");
 export const getJob = (jobId) => request(`/api/jobs/${jobId}`);
+export const listJobs = () => request("/api/jobs?limit=10");
 
 export const startAnalysis = (payload) =>
   request("/api/analyze", { method: "POST", body: JSON.stringify(payload) });
@@ -93,7 +94,7 @@ export function subscribeToJob(jobId, { onSnapshot, onEvent, onError }) {
     };
 
     ["snapshot", "log", "phase", "progress", "problems", "fix", "validation",
-     "diagnosis", "remediation", "pipeline_health", "repo_health", "score", "memory",
+     "diagnosis", "remediation", "pipeline_health", "repo_health", "score", "memory", "pull_request", "ci",
      "heartbeat", "done"].forEach((name) => {
       source.addEventListener(name, (message) => {
         lastActivity = Date.now();

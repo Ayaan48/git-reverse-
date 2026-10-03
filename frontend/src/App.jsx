@@ -11,6 +11,7 @@ import ScoreCard from "./components/ScoreCard.jsx";
 import ActivityLog from "./components/ActivityLog.jsx";
 import ResultPanel from "./components/ResultPanel.jsx";
 import { PipelineHealth, RepoHealth } from "./components/HealthPanels.jsx";
+import RecentRuns from "./components/RecentRuns.jsx";
 import { getHealth, startAnalysis, subscribeToJob } from "./api.js";
 
 const TERMINAL = ["succeeded", "partial", "failed", "cancelled"];
@@ -157,6 +158,9 @@ export default function App() {
 
   const applySnapshot = useCallback((snapshot) => {
     setJob(snapshot);
+    // Server time, so a run opened part-way shows its real elapsed time.
+    const started = snapshot.started_at ?? snapshot.created_at;
+    if (typeof started === "number") startedAtRef.current = started * 1000;
     if (typeof snapshot.elapsed_seconds === "number" && TERMINAL.includes(snapshot.status)) {
       setElapsed(snapshot.elapsed_seconds);
     }
@@ -214,6 +218,12 @@ export default function App() {
         case "memory":
           next.memory = data;
           break;
+        case "pull_request":
+          next.pull_request_url = data.url;
+          break;
+        case "ci":
+          next.ci_verification = data;
+          break;
         default:
           return current;
       }
@@ -253,6 +263,22 @@ export default function App() {
         setError(startError.message);
         setRunning(false);
       }
+    },
+    [applyEvent, applySnapshot],
+  );
+
+  // Watch a run that was started elsewhere, e.g. by a CI-failure trigger.
+  const openJob = useCallback(
+    (jobId) => {
+      setError(null);
+      unsubscribeRef.current?.();
+      setJob({ job_id: jobId, status: "running", phase: "queued", progress: 0, logs: [] });
+      setRunning(true);
+      unsubscribeRef.current = subscribeToJob(jobId, {
+        onSnapshot: applySnapshot,
+        onEvent: applyEvent,
+        onError: (streamError) => setError(streamError.message),
+      });
     },
     [applyEvent, applySnapshot],
   );
@@ -359,6 +385,7 @@ export default function App() {
           <AnalyzeForm onStart={handleStart} running={running} />
           {job && <Progress job={job} elapsed={elapsed} />}
           {job && <ActivityLog logs={job.logs} />}
+          <RecentRuns currentId={job?.job_id} onOpen={openJob} />
         </div>
 
         <div>

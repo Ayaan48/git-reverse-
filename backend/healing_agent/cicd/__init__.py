@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .diagnosis import DiagnosisInput, build_log_corpus, diagnose
 from .incident import build_incident_report
+from .pull_request import build_pull_request
 from .remediation import (
     RemediationPlan,
     apply_runner_failover,
@@ -18,8 +19,12 @@ from .telemetry import (
     collect_telemetry,
     fetch_job_log_excerpt,
 )
+from .verify import CiVerification, wait_for_ci
 
 __all__ = [
+    "CiVerification",
+    "build_pull_request",
+    "wait_for_ci",
     "DiagnosisInput",
     "PipelineTelemetry",
     "PlatformStatus",

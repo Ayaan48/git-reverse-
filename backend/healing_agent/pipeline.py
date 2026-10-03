@@ -22,10 +22,12 @@ from .cicd import (
     assess_repo_health,
     build_incident_report,
     build_log_corpus,
+    build_pull_request,
     collect_telemetry,
     diagnose,
     fetch_platform_status,
     remediate,
+    wait_for_ci,
 )
 from .cicd.statuspage import PlatformStatus
 from .cicd.telemetry import PipelineTelemetry
@@ -169,6 +171,8 @@ def _remember(
         remediations=job.remediations,
         telemetry=telemetry,
         log_text=log_text,
+        ci_verification=job.ci_verification or None,
+        pull_request_url=job.pull_request_url,
     )
     retained = memory.retain(record)
     job.log(
@@ -206,6 +210,9 @@ def run_pipeline(
     try:
         workspace.mkdir(parents=True, exist_ok=True)
         client = GitHubClient(token=token)
+        if request.trigger:
+            job.trigger = job.trigger or request.trigger
+            job.log(f"Triggered by: {request.trigger}")
 
         # ---------------------------------------------------------- CLONE ---
         job.set_phase(
@@ -338,7 +345,7 @@ def run_pipeline(
                 job.repo,
                 changed_workflows,
                 failing_run_id=failing_run_id,
-                execute_pipeline_actions=False,
+                execute_pipeline_actions=request.execute_remediation,
             )
             for step in plan.steps:
                 job.add_remediation(step)
@@ -451,6 +458,7 @@ def run_pipeline(
             checkout.path, max_files=settings.max_repo_files
         ).problems
 
+        pushed = None
         if not changed_files:
             job.log("No changes to push.", "warn")
         elif not request.push:
@@ -483,6 +491,7 @@ def run_pipeline(
                 job.branch_url = result.branch_url
                 job.compare_url = result.compare_url
                 job.commit_sha = result.commit_sha
+                pushed = result
                 job.log(
                     f"Pushed {len(result.files_committed)} file(s) to "
                     f"'{result.branch}' as {result.commit_sha[:8]}"
@@ -492,10 +501,8 @@ def run_pipeline(
                 job.log(f"Push failed: {scrub(str(exc))}", "error")
                 job.error = f"Push failed: {scrub(str(exc))}"
 
-        # ------------------------------------------------------- REPORTING ---
-        job.set_phase(Phase.REPORTING, "Generating report")
-
         # Pre-merge risk notes: reason over past incidents about this change.
+        # Generated before the pull request so its description can carry them.
         if memory.enabled and changed_files and job.memory:
             risk_notes = memory.reflect(
                 f"Pre-merge risk review for a healing branch on "
@@ -510,7 +517,62 @@ def run_pipeline(
             if risk_notes:
                 job.set_memory({**job.memory, "risk_notes": risk_notes})
                 job.log("Memory: pre-merge risk notes generated from past incidents")
+
+        # The speed score measures the agent's own work; waiting on the
+        # repository's CI below is not the agent being slow.
         elapsed = time.monotonic() - started
+
+        # --------------------------------------------------- PULL REQUEST ---
+        if pushed and request.open_pull_request:
+            title, body = build_pull_request(
+                diagnosis=job.diagnosis,
+                problems_found=len(problems_before),
+                fixes=job.fixes,
+                validations=job.validations,
+                memory=job.memory,
+                job_id=job.id,
+                trigger=request.trigger,
+            )
+            try:
+                pull = client.create_pull_request(
+                    job.owner, job.repo, title=title, head=pushed.branch,
+                    base=checkout.base_branch, body=body,
+                )
+                url = (pull or {}).get("html_url")
+                if url:
+                    job.set_pull_request(url)
+                    job.log(f"Opened pull request: {url}")
+            except GitHubError as exc:
+                job.log(f"Could not open a pull request: {scrub(str(exc))}", "warn")
+
+        # ------------------------------------------------------ VERIFY ---
+        if pushed and request.verify_in_ci:
+            job.set_phase(
+                Phase.VERIFYING,
+                f"Waiting for the repository's own CI on {pushed.commit_sha[:8]}",
+            )
+            seen: dict[str, str] = {}
+
+            def ci_progress(runs: list[dict]) -> None:
+                for run in runs:
+                    state = run.get("conclusion") or run.get("status") or "queued"
+                    if seen.get(run["name"]) != state:
+                        seen[run["name"]] = state
+                        job.log(f"  CI '{run['name']}': {state}")
+
+            verification = wait_for_ci(
+                client, job.owner, job.repo, pushed.commit_sha,
+                timeout=settings.ci_wait_seconds, on_update=ci_progress,
+            )
+            ci_progress(verification.runs)
+            job.set_ci_verification(verification.to_dict())
+            job.log(
+                f"Real CI: {verification.detail}",
+                "info" if verification.status == "passed" else "warn",
+            )
+
+        # ------------------------------------------------------- REPORTING ---
+        job.set_phase(Phase.REPORTING, "Generating report")
         score = compute_score(
             problems_before, after, len(job.fixes), elapsed, job.validations
         )
@@ -531,6 +593,9 @@ def run_pipeline(
             score=score,
             branch_url=job.branch_url,
             memory=job.memory,
+            pull_request_url=job.pull_request_url,
+            ci_verification=job.ci_verification or None,
+            trigger=request.trigger,
         )
 
         resolved = len(problems_before) - len(after)
@@ -544,6 +609,15 @@ def run_pipeline(
             status = JobStatus.PARTIAL
         else:
             status = JobStatus.PARTIAL if job.fixes else JobStatus.FAILED
+
+        # The repository's own CI outranks the agent's sandbox: a fix that
+        # passed the agent's gates but failed real CI is not a success.
+        if job.ci_verification.get("status") == "failed" and status is JobStatus.SUCCEEDED:
+            status = JobStatus.PARTIAL
+            job.log(
+                "Real CI failed on the healing commit, so this run is marked partial.",
+                "warn",
+            )
 
         job.log(
             f"Complete: {resolved} of {len(problems_before)} problem(s) "
