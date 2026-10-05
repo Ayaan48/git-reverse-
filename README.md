@@ -34,6 +34,7 @@ verdict, and responds differently to each case.
 | **Heal** | Applies deterministic repairs first, then model-generated ones. Every model patch must parse **and** reduce that file's problem count **and** preserve every function and class it defined, or it is rolled back. |
 | **Validate** | Runs `syntax → imports → lint → compile → tests` gates, looping heal/validate until they pass or no further repair is possible. |
 | **Communicate** | Pushes the branch, opens a pull request, checks the fix in the repository's real CI, and writes an auto-generated post-incident report with root cause, evidence, repairs, and gate results. |
+| **Show the code** | The dashboard's Problems panel shows every problem in its original code (red, with a note saying what is wrong) and the agent's changes as a GitHub-style diff (removed lines red, corrected lines green). Each problem is marked fixed or still there by re-scanning the healed code. |
 | **Run itself** | With the included GitHub Actions trigger, all of the above starts on its own whenever a repository's CI fails. See [Working on its own](#working-on-its-own). |
 
 ---
@@ -560,7 +561,7 @@ backend/healing_agent/
 frontend/src/             React dashboard (Vite)
 scripts/                  setup_memory_bank.py, seed_memory.py, start.sh, start.ps1
 examples/                 heal-on-ci-failure.yml: the trigger that makes it run on its own
-tests/                    127 tests
+tests/                    149 tests
 ```
 
 ---

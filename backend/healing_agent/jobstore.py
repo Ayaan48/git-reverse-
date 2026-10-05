@@ -96,6 +96,11 @@ class Job:
     memory: dict[str, Any] = field(default_factory=dict)
     # Result of watching the repository's real CI on the healing commit.
     ci_verification: dict[str, Any] = field(default_factory=dict)
+    # Code views for the Problems panel: original lines around each problem,
+    # diffs of every changed file, and whether each problem was resolved.
+    excerpts: list[dict[str, Any]] = field(default_factory=list)
+    diffs: list[dict[str, Any]] = field(default_factory=list)
+    problem_status: dict[str, str] = field(default_factory=dict)
     score: dict[str, Any] = field(default_factory=dict)
     incident_report: str = ""
     branch_url: str | None = None
@@ -268,6 +273,17 @@ class Job:
         self.pull_request_url = url
         self._publish("pull_request", {"url": url})
 
+    def set_excerpts(self, excerpts: list[dict[str, Any]]) -> None:
+        self.excerpts = excerpts
+        self._publish("excerpts", {"excerpts": excerpts})
+
+    def set_code_views(
+        self, diffs: list[dict[str, Any]], problem_status: dict[str, str]
+    ) -> None:
+        self.diffs = diffs
+        self.problem_status = problem_status
+        self._publish("diffs", {"diffs": diffs, "problem_status": problem_status})
+
     def set_ci_verification(self, verification: dict[str, Any]) -> None:
         self.ci_verification = verification
         self._publish("ci", verification)
@@ -337,6 +353,9 @@ class Job:
                 "repo_health": self.repo_health,
                 "memory": self.memory,
                 "ci_verification": self.ci_verification,
+                "excerpts": self.excerpts,
+                "diffs": self.diffs,
+                "problem_status": self.problem_status,
                 "score": self.score,
                 "incident_report": self.incident_report,
                 "branch_url": self.branch_url,

@@ -45,9 +45,11 @@ def build_pull_request(
             f"`{diagnosis.recommended_action.value}`  "
         )
     rule_based = sum(1 for f in fixes if f.tier.value == "deterministic")
+    ai = count - rule_based
+    verified = ", each verified before it was kept" if ai else ""
     add(
         f"**Repairs:** {problems_found} problem(s) found, {count} fix(es) applied "
-        f"({rule_based} rule-based, {count - rule_based} AI, every AI fix verified)  "
+        f"({rule_based} rule-based, {ai} AI{verified})  "
     )
     final = validations[-1] if validations else None
     if final:

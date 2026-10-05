@@ -150,17 +150,26 @@ def collect_telemetry(
         elif conclusion == "cancelled":
             telemetry.cancelled_runs += 1
 
+        # A re-run keeps the original run's created_at but gets a new
+        # run_started_at, so for attempt 2+ "started minus created" measures
+        # how long until someone pressed re-run, not runner queue time.
+        first_attempt = int(run.get("run_attempt") or 1) <= 1
+
         if status == "in_progress":
             telemetry.in_progress_runs += 1
         elif status == "queued":
             telemetry.queued_runs += 1
             created = _parse_time(run.get("created_at"))
-            if created and (now - created).total_seconds() > QUEUE_CRITICAL_SECONDS:
+            if (
+                first_attempt
+                and created
+                and (now - created).total_seconds() > QUEUE_CRITICAL_SECONDS
+            ):
                 telemetry.stuck_queued_runs += 1
 
         created = _parse_time(run.get("created_at"))
         started = _parse_time(run.get("run_started_at"))
-        if created and started:
+        if first_attempt and created and started:
             delay = (started - created).total_seconds()
             if delay >= 0:
                 queue_delays.append(delay)

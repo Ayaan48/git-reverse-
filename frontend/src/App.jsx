@@ -224,6 +224,13 @@ export default function App() {
         case "ci":
           next.ci_verification = data;
           break;
+        case "excerpts":
+          next.excerpts = data.excerpts;
+          break;
+        case "diffs":
+          next.diffs = data.diffs;
+          next.problem_status = data.problem_status;
+          break;
         default:
           return current;
       }

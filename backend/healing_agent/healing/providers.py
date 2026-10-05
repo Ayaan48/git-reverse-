@@ -38,6 +38,8 @@ log = logging.getLogger(__name__)
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 CHECK_TIMEOUT_SECONDS = 20.0
+# Longest wait honoured for a per-minute rate limit before giving up.
+MAX_RATE_LIMIT_WAIT = 60.0
 
 
 class ProviderError(Exception):
@@ -296,17 +298,41 @@ class GeminiProvider(RepairProvider):
                     except ValueError as exc:
                         raise ProviderError("Gemini returned a non-JSON body") from exc
                 last = self._classify_http(response)
-                # Retry only transient server trouble, and a rate limit once
-                # (a per-minute limit clears; a daily quota will not).
-                retryable = response.status_code >= 500 or (
-                    response.status_code == 429 and attempt == 0
-                )
-                if not retryable:
+                if response.status_code == 429:
+                    # A per-minute limit clears on its own: wait as long as
+                    # Google asks, once. A daily quota will not clear today.
+                    wait = self._retry_after(response)
+                    if attempt == 0 and wait is not None and wait <= MAX_RATE_LIMIT_WAIT:
+                        self._sleep(wait)
+                        continue
+                    raise last
+                if response.status_code < 500:
                     raise last
             if attempt < 2:
                 self._sleep(2.0 * (attempt + 1))
         assert last is not None
         raise last
+
+    @staticmethod
+    def _retry_after(response: httpx.Response) -> float | None:
+        """Seconds Google asks us to wait, or None for a quota that won't
+        clear soon (a per-day limit)."""
+        try:
+            details = (response.json().get("error") or {}).get("details") or []
+        except ValueError:
+            return 2.0
+        for detail in details:
+            for violation in detail.get("violations") or []:
+                if "PerDay" in str(violation.get("quotaId") or ""):
+                    return None
+        for detail in details:
+            delay = detail.get("retryDelay")
+            if isinstance(delay, str) and delay.endswith("s"):
+                try:
+                    return max(1.0, float(delay[:-1]))
+                except ValueError:
+                    pass
+        return 2.0
 
     # -- interface -----------------------------------------------------------
     def request_repair(self, rel, source, problems, memory_context=""):
@@ -356,18 +382,21 @@ class GeminiProvider(RepairProvider):
             raise ProviderError(f"model returned invalid JSON: {exc}") from exc
 
     def check(self) -> ModelStatus:
+        """Confirm the key works and the model exists, without generating.
+
+        The free tier's per-minute limit is small. A test generation here
+        would compete with real repairs for it, so the monitor asks for the
+        model's metadata instead, which proves the key and the model id
+        without spending any generation quota. A quota problem still shows
+        up when a repair runs, and the run falls back to the other model.
+        """
         status = ModelStatus("gemini", self.model, configured=True)
         try:
-            self._post(
-                {
-                    "contents": [{"role": "user", "parts": [{"text": "Reply with OK."}]}],
-                    "generationConfig": {"maxOutputTokens": 8},
-                },
-                timeout=CHECK_TIMEOUT_SECONDS,
-            )
-            status.ok, status.detail = True, "responding"
-        except ProviderError as exc:
-            status.ok, status.detail = False, str(exc)
+            response = self._http.get(f"/models/{self.model}", timeout=CHECK_TIMEOUT_SECONDS)
+            if response.status_code == 200:
+                status.ok, status.detail = True, "key and model OK"
+            else:
+                status.ok, status.detail = False, str(self._classify_http(response))
         except Exception as exc:  # noqa: BLE001
             status.ok, status.detail = False, _clean(exc)
         status.checked_at = time.time()

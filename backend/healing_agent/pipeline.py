@@ -16,6 +16,8 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import yaml
+
 from .analysis import scan_repository
 from .cicd import (
     DiagnosisInput,
@@ -31,6 +33,12 @@ from .cicd import (
 )
 from .cicd.statuspage import PlatformStatus
 from .cicd.telemetry import PipelineTelemetry
+from .code_views import (
+    build_code_views,
+    capture_excerpts,
+    snapshot_originals,
+    workflow_paths,
+)
 from .config import Settings
 from .github import GitHubClient, GitHubError
 from .healing import heal
@@ -123,6 +131,33 @@ def _workflow_files_changed(
     return []
 
 
+def _workflow_name(path: Path, rel: str) -> str:
+    """The name GitHub shows for a workflow: its `name:`, else its path."""
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        data = None
+    if isinstance(data, dict) and isinstance(data.get("name"), str):
+        return data["name"]
+    return rel
+
+
+def _failing_workflow_changes(
+    root: Path, changed: list[str], failing: list[str]
+) -> list[str]:
+    """Keep only the recently changed workflows that are actually failing.
+
+    A change to some other workflow can't explain this failure. Without this,
+    adding the healing trigger itself (a workflow) reads as a suspicious CI
+    config change and pushes the diagnosis toward a rollback. With no failure
+    telemetry there is nothing to match against, so every change is kept.
+    """
+    if not changed or not failing:
+        return changed
+    wanted = set(failing)
+    return [rel for rel in changed if _workflow_name(root / rel, rel) in wanted]
+
+
 def _parse_iso(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
@@ -206,6 +241,7 @@ def run_pipeline(
     platform_status = PlatformStatus()
     log_text = ""
     recall = MemoryRecall(enabled=memory.enabled)
+    originals: dict[str, str] = {}
 
     try:
         workspace.mkdir(parents=True, exist_ok=True)
@@ -241,6 +277,16 @@ def run_pipeline(
         job.set_phase(Phase.SCANNING, "Scanning repository for defects")
         scan = scan_repository(checkout.path, max_files=settings.max_repo_files)
         problems_before = list(scan.problems)
+        # Before anything changes: the lines around each problem, and copies
+        # of every file the agent may edit, for the dashboard's code view.
+        try:
+            originals = snapshot_originals(
+                checkout.path,
+                {p.file for p in problems_before} | set(workflow_paths(checkout.path)),
+            )
+            job.set_excerpts(capture_excerpts(checkout.path, problems_before))
+        except Exception as exc:  # noqa: BLE001 - a display aid must not stop a run
+            job.log(f"Code view unavailable: {scrub(str(exc))}", "warn")
         job.files_scanned = scan.files_scanned
         job.languages = scan.inventory.languages if scan.inventory else {}
         job.add_problems(problems_before)
@@ -282,8 +328,10 @@ def run_pipeline(
             }
         )
 
-        changed_workflows = _workflow_files_changed(
-            checkout.path, client, job.owner, job.repo
+        changed_workflows = _failing_workflow_changes(
+            checkout.path,
+            _workflow_files_changed(checkout.path, client, job.owner, job.repo),
+            telemetry.failing_workflows,
         )
         critical_count = sum(
             1 for p in problems_before if p.severity is Severity.CRITICAL
@@ -457,6 +505,13 @@ def run_pipeline(
         after = scan_repository(
             checkout.path, max_files=settings.max_repo_files
         ).problems
+        try:
+            views = build_code_views(
+                checkout.path, changed_files, originals, problems_before, after
+            )
+            job.set_code_views(views["diffs"], views["problem_status"])
+        except Exception as exc:  # noqa: BLE001 - a display aid must not stop a run
+            job.log(f"Code view unavailable: {scrub(str(exc))}", "warn")
 
         pushed = None
         if not changed_files:
