@@ -790,3 +790,40 @@ td.wrap { word-break: break-word; min-width: 220px; }
 .ws { color: var(--text-muted); }
 .ws.tab { display: inline-block; width: 4ch; }
 .ws.trail { background: var(--diff-ws-bg); border-radius: 2px; }
+
+/* ------------------------------------------------- expandable problem list */
+.table-tools {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 8px 12px; margin: 12px 0 8px;
+}
+.problem-table td.toggle-cell { width: 1%; padding-right: 2px; }
+.row-toggle {
+  width: 26px; height: 26px; padding: 0; display: inline-grid; place-items: center;
+  border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-1);
+  color: var(--text-secondary); font-size: 0.85rem; line-height: 1; cursor: pointer;
+}
+.row-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.row-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.row-toggle .chev { display: inline-block; transition: transform 0.15s ease; }
+.row-toggle[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.row-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.problem-table tr.row-open > td { border-bottom: none; }
+.problem-table tr.problem-detail > td { padding: 0 0 12px 40px; }
+.problem-table .pending { color: var(--text-muted); }
+.problem-code {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-1); overflow: hidden;
+}
+.problem-code-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface-2);
+  font-size: 0.76rem; color: var(--text-secondary); white-space: normal;
+}
+.problem-code-head .mono { color: var(--text-primary); font-weight: 650; }
+@media (max-width: 640px) {
+  .problem-table tr.problem-detail > td { padding-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .row-toggle .chev { transition: none; }
+}
+.problem-table td.nowrap { white-space: nowrap; }
