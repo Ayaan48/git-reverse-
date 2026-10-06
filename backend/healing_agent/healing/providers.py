@@ -1,15 +1,14 @@
-"""AI repair providers (Claude, Gemini) and live model health checks.
+"""The AI repair provider (Gemini) and its live health check.
 
-Both providers answer the same question -- "return the corrected file as JSON"
--- and the same verification gate judges the result, so the agent can use
-whichever is available and fall back to the other without any change in how
-much a repair is trusted.
+The provider answers one question -- "return the corrected file as JSON" --
+and the verification gate in ai.py judges the result. The provider interface
+is kept so another model could be added later without touching the pipeline.
 
 Failures are classified, because they call for different responses:
 
-* **fatal** -- the provider cannot help for the rest of this run (no credit,
-  bad key, retired model, quota exhausted). Calling it again per file would just
-  repeat the same failure, so the run stops using it and falls through.
+* **fatal** -- the provider cannot help for the rest of this run (bad key,
+  retired model, quota exhausted). Calling it again per file would just
+  repeat the same failure, so the run stops using it.
 * **non-fatal** -- this one request failed (refusal, truncated or malformed
   output, a transient 5xx). Other files may still succeed.
 
@@ -119,96 +118,6 @@ class RepairProvider(ABC):
     @abstractmethod
     def check(self) -> ModelStatus:
         """Cheap live call proving the key, model, and billing all work."""
-
-
-# ------------------------------------------------------------------ claude --
-
-
-class AnthropicProvider(RepairProvider):
-    name = "anthropic"
-
-    def __init__(self, settings: Settings, client: Any = None) -> None:
-        self.settings = settings
-        self.model = settings.model
-        self._client = client
-        register_secret(settings.anthropic_api_key)
-
-    @property
-    def client(self) -> Any:
-        if self._client is None:
-            import anthropic
-
-            self._client = anthropic.Anthropic(api_key=self.settings.anthropic_api_key)
-        return self._client
-
-    @staticmethod
-    def _classify(exc: Exception) -> ProviderError:
-        status = getattr(exc, "status_code", None)
-        text = _clean(exc)
-        lowered = text.lower()
-        fatal = (
-            status in (401, 403, 404)
-            or "credit balance" in lowered
-            or "billing" in lowered
-            or "authentication" in lowered
-        )
-        return ProviderError(text, fatal=fatal)
-
-    def request_repair(self, rel, source, problems, memory_context=""):
-        request: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": 64000,
-            "system": SYSTEM_PROMPT,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": build_user_message(
-                        rel, source, _defect_lines(problems), memory_context
-                    ),
-                }
-            ],
-            "thinking": {"type": "adaptive"},
-            "output_config": {
-                "effort": self.settings.effort,
-                "format": {"type": "json_schema", "schema": RESPONSE_SCHEMA},
-            },
-        }
-        try:
-            # Streaming keeps a large max_tokens from tripping the HTTP timeout.
-            with self.client.messages.stream(**request) as stream:
-                message = stream.get_final_message()
-        except Exception as exc:  # noqa: BLE001 - classified below
-            raise self._classify(exc) from exc
-
-        if getattr(message, "stop_reason", None) == "refusal":
-            details = getattr(message, "stop_details", None)
-            raise ProviderError(
-                f"model declined to repair this file "
-                f"({getattr(details, 'category', 'unspecified')})"
-            )
-        text = next(
-            (block.text for block in message.content if block.type == "text"), None
-        )
-        if not text:
-            return None
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ProviderError(f"model returned invalid JSON: {exc}") from exc
-
-    def check(self) -> ModelStatus:
-        status = ModelStatus("anthropic", self.model, configured=True)
-        try:
-            self.client.with_options(timeout=CHECK_TIMEOUT_SECONDS).messages.create(
-                model=self.model,
-                max_tokens=8,
-                messages=[{"role": "user", "content": "Reply with OK."}],
-            )
-            status.ok, status.detail = True, "responding"
-        except Exception as exc:  # noqa: BLE001
-            status.ok, status.detail = False, _clean(exc)
-        status.checked_at = time.time()
-        return status
 
 
 # ------------------------------------------------------------------ gemini --
@@ -407,20 +316,13 @@ class GeminiProvider(RepairProvider):
 
 
 def active_provider_names(settings: Settings) -> list[str]:
-    """Providers in play, in order: selected by HEALING_AGENT_PROVIDER AND keyed."""
-    order = {"anthropic": ["anthropic"], "gemini": ["gemini"]}.get(
-        settings.ai_provider, ["anthropic", "gemini"]
-    )
-    keys = {"anthropic": settings.anthropic_api_key, "gemini": settings.gemini_api_key}
-    return [name for name in order if keys[name]]
+    """Providers in play: Gemini, when its key is configured."""
+    return ["gemini"] if settings.gemini_api_key else []
 
 
 def build_providers(settings: Settings) -> list[RepairProvider]:
     """Providers to try, in order."""
-    return [
-        AnthropicProvider(settings) if name == "anthropic" else GeminiProvider(settings)
-        for name in active_provider_names(settings)
-    ]
+    return [GeminiProvider(settings) for _ in active_provider_names(settings)]
 
 
 # ------------------------------------------------------------ model monitor --
@@ -430,22 +332,11 @@ _cache_lock = threading.Lock()
 
 
 def _unconfigured(settings: Settings) -> list[ModelStatus]:
-    """Rows for providers not in play, so the dashboard can say why."""
-    active = set(active_provider_names(settings))
-    rows = []
-    for name, key, model, label in (
-        ("anthropic", settings.anthropic_api_key, settings.model, "Anthropic"),
-        ("gemini", settings.gemini_api_key, settings.gemini_model, "Gemini"),
-    ):
-        if name in active:
-            continue
-        reason = (
-            f"no {label} API key configured"
-            if not key
-            else f"not selected (HEALING_AGENT_PROVIDER={settings.ai_provider})"
-        )
-        rows.append(ModelStatus(name, model, False, None, reason))
-    return rows
+    """A row for Gemini when it is not configured, so the dashboard can say why."""
+    if settings.gemini_api_key:
+        return []
+    return [ModelStatus("gemini", settings.gemini_model, False, None,
+                        "no Gemini API key configured")]
 
 
 def check_models(

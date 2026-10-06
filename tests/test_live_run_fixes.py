@@ -22,7 +22,7 @@ OK_ANSWER = {"candidates": [{"finishReason": "STOP", "content": {"parts": [
 
 
 def _gemini(tmp_path, handler, sleeps):
-    settings = Settings(workspace_root=tmp_path, anthropic_api_key=None, gemini_api_key=KEY)
+    settings = Settings(workspace_root=tmp_path, gemini_api_key=KEY)
     return GeminiProvider(settings, transport=httpx.MockTransport(handler), sleep=sleeps.append)
 
 

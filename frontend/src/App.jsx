@@ -293,7 +293,6 @@ export default function App() {
   const aiEnabled = health?.checks?.ai_repair_tier;
   // Live model checks: configured providers, and whether each one answers.
   const aiModels = (health?.checks?.ai_models ?? []).filter((m) => m.configured);
-  const aiWorking = aiModels.some((m) => m.ok);
   const aiFailing = aiModels.filter((m) => m.ok === false);
 
   return (
@@ -335,7 +334,7 @@ export default function App() {
                 title={`${m.model}: ${m.detail}`}
               >
                 <span className="dot" />
-                {m.provider === "gemini" ? "Gemini" : "Claude"}{" "}
+                Gemini{" "}
                 {m.ok ? "ready" : "failing"}
               </span>
             ))
@@ -364,12 +363,10 @@ export default function App() {
 
       {aiFailing.length > 0 && (
         <div className="banner warn">
-          {aiWorking
-            ? "A configured AI model is failing; the agent falls back to the other one. "
-            : "Every configured AI model is failing, so only rule-based repairs will run. "}
+          Gemini is failing, so only rule-based repairs will run until it recovers.
           {aiFailing.map((m) => (
             <div key={m.provider}>
-              <strong>{m.provider === "gemini" ? "Gemini" : "Claude"}</strong>{" "}
+              <strong>Gemini</strong>{" "}
               <span className="mono">({m.model})</span>: {m.detail}
             </div>
           ))}
@@ -378,8 +375,7 @@ export default function App() {
 
       {health && !aiEnabled && (
         <div className="banner info">
-          No AI key configured (<span className="mono">ANTHROPIC_API_KEY</span> or{" "}
-          <span className="mono">GEMINI_API_KEY</span>) — the agent still detects
+          No <span className="mono">GEMINI_API_KEY</span> configured — the agent still detects
           problems and applies deterministic repairs, but the AI repair tier is
           disabled.
         </div>

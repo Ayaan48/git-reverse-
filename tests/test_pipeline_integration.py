@@ -51,7 +51,7 @@ def _run(source: Path, tmp_path: Path, monkeypatch, **overrides):
         lambda settings, client, token: _stub_backend(source),
     )
     settings = Settings(
-        anthropic_api_key=None, workspace_root=tmp_path / "ws", max_rounds=2
+        gemini_api_key=None, workspace_root=tmp_path / "ws", max_rounds=2
     )
     (tmp_path / "ws").mkdir(parents=True, exist_ok=True)
     job = JobStore().create(
@@ -121,7 +121,7 @@ def test_no_token_still_analyses_but_reports_it_cannot_push(
         lambda settings, client, token: _stub_backend(broken_repo),
     )
     settings = Settings(
-        anthropic_api_key=None, workspace_root=tmp_path / "ws2", max_rounds=1,
+        gemini_api_key=None, workspace_root=tmp_path / "ws2", max_rounds=1,
         fallback_github_token=None,
     )
     (tmp_path / "ws2").mkdir(parents=True, exist_ok=True)

@@ -14,13 +14,9 @@ services:
     # so a UI change ships with the same push as a backend change.
     autoDeploy: true
     envVars:
-      # Set this in the Render dashboard to enable model-generated repairs.
-      # Without it the agent still detects every problem category and applies
-      # the deterministic repair tier.
-      - key: ANTHROPIC_API_KEY
-        sync: false
-
-      # Optional second AI model; used as a fallback when Claude is unavailable.
+      # Set this in the Render dashboard to enable model-generated repairs
+      # (Gemini). Without it the agent still detects every problem category
+      # and applies the deterministic repair tier.
       - key: GEMINI_API_KEY
         sync: false
 

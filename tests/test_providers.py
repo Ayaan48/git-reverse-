@@ -1,4 +1,4 @@
-"""AI providers (Claude, Gemini): fallback, failure handling, and live model checks."""
+"""The Gemini repair provider: failure handling, retiring, and live model checks."""
 
 import json
 import logging
@@ -9,7 +9,6 @@ from healing_agent.config import Settings
 from healing_agent.healing import ai as ai_module
 from healing_agent.healing import providers as prov
 from healing_agent.healing.providers import (
-    AnthropicProvider,
     GeminiProvider,
     ModelStatus,
     ProviderError,
@@ -33,7 +32,6 @@ def _fresh_cache():
 
 
 def _settings(tmp_path, **kw):
-    kw.setdefault("anthropic_api_key", None)
     kw.setdefault("gemini_api_key", None)
     return Settings(workspace_root=tmp_path, **kw)
 
@@ -185,53 +183,19 @@ def test_gemini_check_reports_ok_and_failure(tmp_path):
     assert GEMINI_KEY not in status.detail
 
 
-# ------------------------------------------------------------------ claude --
-
-
-class _Err(Exception):
-    def __init__(self, message, status_code):
-        super().__init__(message)
-        self.status_code = status_code
-
-
-def test_claude_credit_error_is_fatal(tmp_path):
-    exc = _Err("Your credit balance is too low to access the Anthropic API.", 400)
-    assert AnthropicProvider._classify(exc).fatal
-    assert AnthropicProvider._classify(_Err("invalid x-api-key", 401)).fatal
-    assert not AnthropicProvider._classify(_Err("overloaded", 529)).fatal
-
-
-def test_claude_check_surfaces_the_billing_error(tmp_path):
-    class Client:
-        def with_options(self, **kw):
-            return self
-
-        class messages:  # noqa: N801
-            @staticmethod
-            def create(**kw):
-                raise _Err("Your credit balance is too low to access the API", 400)
-
-    provider = AnthropicProvider(_settings(tmp_path, anthropic_api_key="sk-ant-x"), client=Client())
-    status = provider.check()
-    assert status.ok is False and "credit balance" in status.detail
-
-
 # ---------------------------------------------------------------- registry --
 
 
-def test_provider_order_and_selection(tmp_path):
-    both = _settings(tmp_path, anthropic_api_key="a", gemini_api_key="g")
-    assert active_provider_names(both) == ["anthropic", "gemini"]
-    assert [p.name for p in build_providers(both)] == ["anthropic", "gemini"]
+def test_gemini_is_the_only_provider_and_needs_its_key(tmp_path):
+    keyed = _settings(tmp_path, gemini_api_key="g")
+    assert active_provider_names(keyed) == ["gemini"]
+    assert [p.name for p in build_providers(keyed)] == ["gemini"]
+    assert keyed.ai_enabled is True
 
-    only_gemini = _settings(tmp_path, anthropic_api_key="a", gemini_api_key="g",
-                            ai_provider="gemini")
-    assert active_provider_names(only_gemini) == ["gemini"]
-
-    asked_but_unkeyed = _settings(tmp_path, anthropic_api_key="a", ai_provider="gemini")
-    assert active_provider_names(asked_but_unkeyed) == []
-    assert _settings(tmp_path).ai_enabled is False
-    assert _settings(tmp_path, gemini_api_key="g").ai_enabled is True
+    unkeyed = _settings(tmp_path)
+    assert active_provider_names(unkeyed) == []
+    assert build_providers(unkeyed) == []
+    assert unkeyed.ai_enabled is False
 
 
 # ---------------------------------------------------------- repair fallback --
@@ -271,52 +235,45 @@ def _use(monkeypatch, *providers):
     monkeypatch.setattr(ai_module, "build_providers", lambda settings: list(providers))
 
 
-def test_falls_back_to_gemini_when_claude_has_no_credit(tmp_path, monkeypatch):
+def test_gemini_repairs_every_file_and_is_credited(tmp_path, monkeypatch):
     root = _repo(tmp_path, count=3)
-    claude = FakeProvider("anthropic", ProviderError("credit balance is too low", fatal=True))
     gemini = FakeProvider("gemini", FIXED)
-    _use(monkeypatch, claude, gemini)
+    _use(monkeypatch, gemini)
 
     outcome = ai_module.apply_ai_fixes(root, _scan(root), _settings(tmp_path, gemini_api_key="g"))
 
     assert outcome.accepted == 3 and outcome.rejected == 0
-    assert claude.calls == 1, "a fatally failed provider is retired for the run"
-    assert gemini.calls == 3
     assert outcome.models_used == {"gemini-model": 3}
-    assert any("anthropic" in n and "unavailable" in n for n in outcome.notes)
     assert "via gemini-model" in outcome.fixes[0].description
     assert (root / "m0.py").read_text().startswith("import statistics")
 
 
-def test_non_fatal_failure_falls_through_without_retiring_the_provider(tmp_path, monkeypatch):
+def test_a_one_off_failure_does_not_stop_later_files(tmp_path, monkeypatch):
     root = _repo(tmp_path, count=2)
-    claude = FakeProvider("anthropic", ProviderError("response truncated"))
-    gemini = FakeProvider("gemini", FIXED)
-    _use(monkeypatch, claude, gemini)
+    gemini = FakeProvider("gemini", ProviderError("response truncated"))
+    _use(monkeypatch, gemini)
 
     ai_module.apply_ai_fixes(root, _scan(root), _settings(tmp_path, gemini_api_key="g"))
-    assert claude.calls == 2, "a one-off failure must not retire the provider"
+    assert gemini.calls == 2, "a one-off failure must not retire the provider"
 
 
-def test_all_providers_dead_stops_early_and_changes_nothing(tmp_path, monkeypatch):
+def test_a_fatal_failure_stops_ai_repairs_for_the_run(tmp_path, monkeypatch):
     root = _repo(tmp_path, count=3)
-    dead = ProviderError("credit balance is too low", fatal=True)
-    claude = FakeProvider("anthropic", dead)
     gemini = FakeProvider("gemini", ProviderError("quota exceeded", fatal=True))
-    _use(monkeypatch, claude, gemini)
+    _use(monkeypatch, gemini)
 
     outcome = ai_module.apply_ai_fixes(root, _scan(root), _settings(tmp_path, gemini_api_key="g"))
 
     assert outcome.accepted == 0 and not outcome.fixes
-    assert claude.calls == 1 and gemini.calls == 1, "no repeated calls to dead providers"
-    assert any("Every AI provider is unavailable" in n for n in outcome.notes)
+    assert gemini.calls == 1, "no repeated calls to a dead provider"
+    assert any("gemini" in n and "unavailable" in n for n in outcome.notes)
     assert (root / "m0.py").read_text() == BROKEN_SRC
 
 
-def test_no_provider_configured_skips_the_tier(tmp_path):
+def test_no_key_skips_the_ai_tier(tmp_path):
     root = _repo(tmp_path)
     outcome = ai_module.apply_ai_fixes(root, _scan(root), _settings(tmp_path))
-    assert "No AI provider is configured" in outcome.skipped_reason
+    assert "GEMINI_API_KEY is not set" in outcome.skipped_reason
 
 
 def test_gemini_output_faces_the_same_verification_gate(tmp_path, monkeypatch):
@@ -371,7 +328,7 @@ def test_cached_status_avoids_calling_the_model_every_time(tmp_path, monkeypatch
     for _ in range(5):
         rows = cached_model_status(settings)
     assert len(calls) == 1
-    assert any(r.provider == "anthropic" and not r.configured for r in rows)
+    assert [r.provider for r in rows] == ["gemini"]
 
 
 def test_health_endpoint_reports_models_without_keys(tmp_path):
@@ -380,7 +337,7 @@ def test_health_endpoint_reports_models_without_keys(tmp_path):
 
     body = TestClient(app).get("/api/health").json()
     models = {m["provider"]: m for m in body["checks"]["ai_models"]}
-    assert set(models) == {"anthropic", "gemini"}
+    assert set(models) == {"gemini"}
     assert all(m["configured"] is False and m["ok"] is None for m in models.values())
     assert body["checks"]["ai_repair_tier"] is False
 

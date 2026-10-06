@@ -116,7 +116,7 @@ async def health() -> HealthResponse:
     # service degraded. Pinged off the event loop: the client blocks.
     memory = await asyncio.to_thread(get_memory_service().ping)
     # Live model status, refreshed by the background monitor (and on demand
-    # here when stale), so the dashboard can say "Claude: no credit" up front.
+    # here when stale), so the dashboard can say "Gemini: bad key" up front.
     models = await asyncio.to_thread(cached_model_status, settings)
     checks: dict[str, Any] = {
         "job_store": "ok",

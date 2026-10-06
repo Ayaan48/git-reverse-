@@ -244,9 +244,8 @@ def apply_ai_fixes(
     providers = build_providers(settings)
     if not providers:
         outcome.skipped_reason = (
-            "No AI provider is configured (set ANTHROPIC_API_KEY or "
-            "GEMINI_API_KEY) - AI repair tier disabled. Deterministic fixes "
-            "were still applied."
+            "GEMINI_API_KEY is not set - AI repair tier disabled. "
+            "Deterministic fixes were still applied."
         )
         return outcome
     dead: dict[str, str] = {}

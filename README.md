@@ -103,9 +103,9 @@ or install Python from python.org with "Add to PATH" ticked.
 Open http://127.0.0.1:5173, fill in the form, and click **Analyze & heal
 repository**.
 
-The agent runs without an Anthropic API key — it still detects every problem
-category and applies the deterministic repair tier. Set `ANTHROPIC_API_KEY` to
-enable model-generated repairs for defects that need reasoning.
+The agent runs without an AI key — it still detects every problem category
+and applies the deterministic repair tier. Set `GEMINI_API_KEY` to enable
+model-generated repairs for defects that need reasoning.
 
 ```bash
 cp .env.example .env      # then edit
@@ -160,30 +160,31 @@ dashboard's **Open pull request** and **Verify in real CI** checkboxes.
 
 ---
 
-## AI repair models (Claude and Gemini)
+## AI repair model (Gemini)
 
-The AI tier handles what the rule-based tier cannot. It can use **Claude**,
-**Gemini**, or both. Set either key; with both, Claude goes first and Gemini is
-the fallback (`HEALING_AGENT_PROVIDER` changes the order). With neither, the
-agent still runs and applies every rule-based repair.
+The AI tier handles what the rule-based tier cannot, using Google's **Gemini**
+(`gemini-2.5-flash` by default). Without `GEMINI_API_KEY` the agent still runs
+and applies every rule-based repair.
 
-- **Same trust for both.** A Gemini repair faces the identical gate as a Claude
-  one: it must parse, strictly reduce the file's problem count, and keep every
-  function and class, or the file is restored. The report credits the model
-  that made each repair (`via gemini-2.5-flash`).
-- **Failures are classified.** A *fatal* failure (no credit, bad key, retired
-  model, quota exhausted) retires that model for the rest of the run, so one
-  empty account costs one failed call rather than one per file, and the next
-  model takes over. A one-off failure (a refusal, a truncated answer, a 5xx)
-  only affects that file.
-- **It keeps checking.** A background monitor re-verifies every configured
-  model each `HEALING_AGENT_MODEL_CHECK_SECONDS`, logs a warning the moment one
-  starts failing (and an info line when it recovers), and publishes the result
-  in `GET /api/health` under `checks.ai_models`. The dashboard shows a
-  Claude / Gemini pill per model and a banner with the provider's own error,
-  such as an empty balance, before you start a run rather than after it fails.
-- **No new dependency.** Gemini is called over HTTPS with `httpx`, which the
-  project already uses, and the key travels in a header, never in a URL.
+- **Never trusted blindly.** Every Gemini repair must parse, strictly reduce the
+  file's problem count, and keep every function, class and docstring, or the
+  file is restored. The report credits the model that made each repair
+  (`via gemini-2.5-flash`).
+- **Failures are classified.** A *fatal* failure (bad key, retired model, daily
+  quota used up) stops AI repairs for the rest of the run, so it costs one
+  failed call rather than one per file. A per-minute rate limit is waited out
+  once, for as long as Google asks (up to a minute). A one-off failure (a
+  refusal, a truncated answer, a 5xx) only affects that file.
+- **It keeps checking.** A background monitor re-checks Gemini each
+  `HEALING_AGENT_MODEL_CHECK_SECONDS` by reading the model's metadata, which
+  uses no generation quota. It logs when Gemini starts failing or recovers and
+  publishes the result in `GET /api/health` under `checks.ai_models`; the
+  dashboard shows a Gemini pill and a banner with Google's own error.
+- **No extra SDK.** Gemini is called over HTTPS with `httpx`, which the project
+  already uses, and the key travels in a header, never in a URL.
+- **Replaceable.** The model sits behind a small provider interface
+  (`healing/providers.py`), so another model could be added without touching
+  the pipeline.
 
 ---
 
@@ -292,13 +293,11 @@ confusing mid-run failure.
   "checks": {
     "git_binary": true, "ruff": true, "ai_repair_tier": true,
     "ai_models": [
-      { "provider": "anthropic", "model": "claude-opus-5", "ok": false,
-        "detail": "Your credit balance is too low to access the Anthropic API." },
-      { "provider": "gemini", "model": "gemini-2.5-flash", "ok": true, "detail": "responding" }
+      { "provider": "gemini", "model": "gemini-2.5-flash", "ok": true, "detail": "key and model OK" }
     ],
     "memory": { "enabled": true, "connected": true, "bank_id": "cicd-healing-agent" }
   },
-  "config": { "repo_backend": "git-cli", "model": "claude-opus-5" }
+  "config": { "repo_backend": "git-cli", "model": "gemini-2.5-flash" }
 }
 ```
 
@@ -421,7 +420,7 @@ frontend bundle.
 1. Push this repository to your GitHub account.
 2. On [render.com](https://render.com): **New → Blueprint** → pick the repo.
    `render.yaml` supplies the rest.
-3. Optionally add `ANTHROPIC_API_KEY` in the dashboard to enable AI repairs.
+3. Optionally add `GEMINI_API_KEY` in the dashboard to enable AI repairs.
 
 Your URL is then `https://<service-name>.onrender.com`. Free instances sleep
 after inactivity, so the first request after an idle period takes ~50s.
@@ -444,7 +443,7 @@ is the path Render's health check polls.
 
 ```bash
 docker build -t healing-agent .
-docker run -p 8000:8000 -e ANTHROPIC_API_KEY=sk-ant-… healing-agent
+docker run -p 8000:8000 -e GEMINI_API_KEY=… healing-agent
 ```
 
 Open http://127.0.0.1:8000 — dashboard and API on the same port. The image
@@ -511,14 +510,10 @@ silently breaking things.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Enables the AI repair tier. Optional. |
-| `GEMINI_API_KEY` | — | Second AI model for repairs: fallback for Claude, or used alone. Optional. |
+| `GEMINI_API_KEY` | — | Enables the AI repair tier (Gemini). Optional. |
 | `HEALING_AGENT_GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model id (configurable because Google retires ids) |
-| `HEALING_AGENT_PROVIDER` | `auto` | `auto` (Claude, then Gemini), `anthropic`, or `gemini` |
 | `HEALING_AGENT_MODEL_CHECK_SECONDS` | `300` | How often the background monitor re-checks each AI model (min 30) |
 | `HEALING_AGENT_CI_WAIT_SECONDS` | `300` | How long a run waits for real CI when `verify_in_ci` is on; keep it under the job timeout |
-| `HEALING_AGENT_MODEL` | `claude-opus-5` | Claude model for repair and diagnosis |
-| `HEALING_AGENT_EFFORT` | `high` | `low` … `max` |
 | `GITHUB_TOKEN` | — | Fallback token for local development |
 | `HEALING_AGENT_WORKSPACE` | `.workspaces` | Checkout directory; falls back to `/tmp` if read-only |
 | `HEALING_AGENT_MAX_ROUNDS` | `3` | Heal/validate rounds |
@@ -561,7 +556,7 @@ backend/healing_agent/
 frontend/src/             React dashboard (Vite)
 scripts/                  setup_memory_bank.py, seed_memory.py, start.sh, start.ps1
 examples/                 heal-on-ci-failure.yml: the trigger that makes it run on its own
-tests/                    149 tests
+tests/                    147 tests
 ```
 
 ---

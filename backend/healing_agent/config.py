@@ -85,18 +85,8 @@ def _default_workspace() -> Path:
 class Settings:
     """Immutable snapshot of the agent's configuration."""
 
-    anthropic_api_key: str | None = field(
-        default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY") or None
-    )
-    model: str = field(
-        default_factory=lambda: os.environ.get("HEALING_AGENT_MODEL", "claude-opus-5")
-    )
-    effort: str = field(
-        default_factory=lambda: os.environ.get("HEALING_AGENT_EFFORT", "high")
-    )
-    # Second repair provider. Used alongside (or instead of) Claude; see
-    # HEALING_AGENT_PROVIDER for the order. The model name is configurable
-    # because Google retires model ids on its own schedule.
+    # The AI repair model. The model name is configurable because Google
+    # retires model ids on its own schedule.
     gemini_api_key: str | None = field(
         default_factory=lambda: os.environ.get("GEMINI_API_KEY")
         or os.environ.get("GOOGLE_API_KEY")
@@ -106,12 +96,6 @@ class Settings:
         default_factory=lambda: os.environ.get(
             "HEALING_AGENT_GEMINI_MODEL", "gemini-2.5-flash"
         )
-    )
-    # auto = Claude first, Gemini as fallback | anthropic | gemini
-    ai_provider: str = field(
-        default_factory=lambda: os.environ.get("HEALING_AGENT_PROVIDER", "auto")
-        .strip()
-        .lower()
     )
     # How long a run waits for the repository's real CI on the healing commit
     # (only when verify_in_ci is requested). Keep it under the job timeout.
@@ -165,8 +149,8 @@ class Settings:
 
     @property
     def ai_enabled(self) -> bool:
-        """True when at least one AI provider has a key configured."""
-        return bool(self.anthropic_api_key or self.gemini_api_key)
+        """True when the Gemini key is configured."""
+        return bool(self.gemini_api_key)
 
     @property
     def git_cli_available(self) -> bool:
@@ -175,11 +159,8 @@ class Settings:
     def describe(self) -> dict[str, object]:
         """Non-secret view of the configuration, safe to serve over HTTP."""
         return {
-            "model": self.model,
-            "effort": self.effort,
             "ai_enabled": self.ai_enabled,
-            "ai_provider": self.ai_provider,
-            "gemini_model": self.gemini_model,
+            "model": self.gemini_model,
             "model_check_seconds": self.model_check_seconds,
             "ci_wait_seconds": self.ci_wait_seconds,
             "git_cli_available": self.git_cli_available,
