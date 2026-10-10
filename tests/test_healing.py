@@ -8,6 +8,7 @@ from healing_agent.healing.ai import public_symbols, rewrite_destroys_code
 from healing_agent.healing.deterministic import (
     _strip_json_trailing_commas,
     fix_mixed_indentation,
+    run_ruff_autofix,
 )
 
 
@@ -80,3 +81,43 @@ def test_genuine_repair_is_accepted():
     source = "def a():\n    return undefined_thing()\n"
     repaired = "def a():\n    return 2\n"
     assert rewrite_destroys_code(source, repaired, ".py") is None
+
+
+def test_autofix_never_changes_files_while_reporting_zero(tmp_path: Path):
+    """The agent must never edit code and report that it did not.
+
+    The count used to come from scraping ruff's summary line. When ruff moved
+    from "Fixed 29 errors" to "Found 41 errors (29 fixed, 12 remaining)" the
+    regex stopped matching, and a run rewrote four files while the dashboard
+    and the report both said "0 fixes applied".
+    """
+    from healing_agent.healing.deterministic import run_ruff_autofix
+    from healing_agent.repo.base import fingerprint_tree
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "mod.py").write_text(
+        "import os\nimport sys\n\n\ndef f(values):\n    return len(values)   \n"
+    )
+
+    before = fingerprint_tree(root)
+    count, summary = run_ruff_autofix(root)
+    after = fingerprint_tree(root)
+
+    changed = [rel for rel, d in after.items() if before.get(rel) != d]
+    if changed:
+        assert count > 0, (
+            f"{len(changed)} file(s) were modified but the run reported "
+            f"{count} fixes ({summary!r})"
+        )
+        assert "no fixes applied" not in summary
+
+
+def test_autofix_reports_zero_when_nothing_changes(tmp_path: Path):
+    root = tmp_path / "clean"
+    root.mkdir()
+    (root / "mod.py").write_text('"""Clean."""\n\n\ndef f(a, b):\n    return a + b\n')
+
+    count, summary = run_ruff_autofix(root)
+    assert count == 0
+    assert "no fixes applied" in summary

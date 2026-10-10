@@ -221,13 +221,25 @@ def fix_final_newline(path: Path) -> bool:
 def run_ruff_autofix(root: Path, timeout: float = 180.0) -> tuple[int, str]:
     """Apply ruff's safe autofixes across the checkout.
 
-    Returns the number of fixes applied and ruff's summary line. Unsafe fixes
-    are deliberately not enabled: they can change behaviour, and this agent
-    must never trade a lint warning for a behavioural regression.
+    Returns how many fixes were applied and a human-readable summary. Unsafe
+    fixes are deliberately not enabled: they can change behaviour, and this
+    agent must never trade a lint warning for a behavioural regression.
+
+    The count comes from a content hash of the tree, not from parsing ruff's
+    output. Scraping the summary line is what broke before -- ruff moved from
+    "Fixed 29 errors" to "Found 41 errors (29 fixed, 12 remaining)", the regex
+    stopped matching, and the agent reported "0 fixes applied" while having
+    rewritten four files. Silently editing someone's code and telling them you
+    did not is the worst failure this function has, so the count is now
+    derived from what actually changed on disk.
     """
     command = ruff_command()
     if command is None:
         return 0, "ruff is not available in this environment"
+
+    from ..repo.base import fingerprint_tree
+
+    before = fingerprint_tree(root)
     try:
         result = subprocess.run(
             [
@@ -239,11 +251,20 @@ def run_ruff_autofix(root: Path, timeout: float = 180.0) -> tuple[int, str]:
     except (subprocess.TimeoutExpired, OSError) as exc:
         return 0, f"ruff autofix unavailable: {exc}"
 
+    after = fingerprint_tree(root)
+    changed = sum(1 for rel, digest in after.items() if before.get(rel) != digest)
+
+    # Ruff's own tally is more precise when it can be read (several fixes may
+    # land in one file), but it is only ever used to enrich the summary.
     output = (result.stdout or "") + (result.stderr or "")
-    match = re.search(r"Fixed (\d+) error", output)
-    count = int(match.group(1)) if match else 0
-    summary = match.group(0) if match else "no fixes applied"
-    return count, summary
+    reported = re.search(r"(\d+) fixed", output) or re.search(
+        r"Fixed (\d+) error", output
+    )
+    fixes = int(reported.group(1)) if reported else changed
+
+    if not changed:
+        return 0, "no fixes applied"
+    return fixes, f"{fixes} fix(es) applied across {changed} file(s)"
 
 
 # ---------------------------------------------------------------- dispatch --
