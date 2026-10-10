@@ -18,6 +18,7 @@ from .python_checks import (
     detect_syntax_problems,
 )
 from .scanning import RepoInventory, build_inventory
+from .workflow_steps import detect_pip_problems
 
 __all__ = [
     "ScanResult",
@@ -76,6 +77,9 @@ def scan_repository(
     result.problems.extend(detect_json_problems(inventory))
     result.problems.extend(detect_yaml_problems(inventory))
     result.detectors_run.extend(["json", "yaml/workflow"])
+
+    result.problems.extend(detect_pip_problems(inventory))
+    result.detectors_run.append("workflow-pip")
 
     result.problems.sort(
         key=lambda p: (-p.severity.weight, p.file, p.line)
